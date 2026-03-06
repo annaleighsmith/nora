@@ -17,18 +17,25 @@ import (
 // TODO: Consider accepting piped input (stdin) for file paths,
 // e.g. `find ~/old-notes -name "*.md" | n import -`
 var importCmd = &cobra.Command{
-	Use:   "import <path>...",
+	Use:   "import <path>... [output-name.md]",
 	Short: "Import markdown notes with AI formatting",
-	Long:  "Import .md files with AI-generated frontmatter. Accepts files and/or directories.",
-	Args:  cobra.MinimumNArgs(1),
-	RunE:  runImport,
+	Long: `Import .md files with AI-generated frontmatter. Accepts files and/or directories.
+
+  n import file.md                     single file, AI names it
+  n import file.md my-name.md          single file, you name it
+  n import a.md b.md c.md              multiple files
+  n import ~/old-notes/                directory (top-level only)
+  n import ~/old-notes/ -r             directory (recursive)
+  n import ~/old-notes/ -r -x Archive  recursive, skip Archive/`,
+	Args: cobra.MinimumNArgs(1),
+	RunE: runImport,
 }
 
 func init() {
 	rootCmd.AddCommand(importCmd)
 	importCmd.Flags().BoolP("force", "f", false, "Re-import previously imported files")
 	importCmd.Flags().BoolP("recursive", "r", false, "Recurse into subdirectories")
-	importCmd.Flags().StringSliceP("ignore", "i", nil, "Directories to skip (repeatable, e.g. -i Archive -i Templates)")
+	importCmd.Flags().StringSliceP("exclude", "x", nil, "Directories to skip (repeatable, e.g. -x Archive -x Templates)")
 }
 
 type importEntry struct {
@@ -46,7 +53,23 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	force, _ := cmd.Flags().GetBool("force")
 	recursive, _ := cmd.Flags().GetBool("recursive")
-	ignoreDirs, _ := cmd.Flags().GetStringSlice("ignore")
+	ignoreDirs, _ := cmd.Flags().GetStringSlice("exclude")
+
+	// Custom output name: n import file.md my-slug.md
+	// Only when: exactly 2 args, first is an existing file, second doesn't exist on disk
+	var customName string
+	if len(args) == 2 {
+		srcInfo, srcErr := os.Stat(args[0])
+		_, destErr := os.Stat(args[1])
+		if srcErr == nil && !srcInfo.IsDir() && os.IsNotExist(destErr) {
+			candidate := args[1]
+			if !strings.HasSuffix(candidate, ".md") {
+				candidate += ".md"
+			}
+			customName = candidate
+			args = args[:1]
+		}
+	}
 
 	// Build ignore set (always skip dot directories)
 	ignoreSet := make(map[string]bool)
@@ -173,7 +196,12 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 		// Prepend frontmatter to original content (preserved untouched)
 		combined := frontmatter + "\n\n" + input
-		newFilename := deduplicateFilename(dir, generateFilename(frontmatter))
+		var newFilename string
+		if customName != "" {
+			newFilename = deduplicateFilename(dir, customName)
+		} else {
+			newFilename = deduplicateFilename(dir, generateFilename(frontmatter))
+		}
 
 		entries = append(entries, importEntry{
 			originalPath: absPath,

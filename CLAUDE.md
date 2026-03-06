@@ -64,3 +64,11 @@ This is a learning project. The goal is understanding, not speed. Follow this lo
 - Support `[[wiki-links]]` in web UI
 - Bullet points over numbered lists in note content
 - Guard clauses and early returns over nested if/else
+
+## CLI Design
+
+- Follow unix conventions for flags and arg patterns (e.g. `-r` for recursive, `-f` for force, `-x` for exclude)
+- Avoid flag collisions with well-known unix meanings (`-i` = interactive, `-v` = verbose, `-n` = dry-run)
+- Model commands after familiar tools where applicable (`import` follows `cp` patterns, `tags` follows `git tag`)
+- Short flags for common operations, long flags for less common ones
+- Commands should work intuitively for anyone comfortable with a terminal
