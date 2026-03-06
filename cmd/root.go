@@ -18,7 +18,7 @@ var skipConfigCheck = map[string]bool{
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "n",
+	Use:   "nora",
 	Short: "A terminal-first AI-powered note-taking tool",
 	Args:  cobra.ArbitraryArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -26,7 +26,7 @@ var rootCmd = &cobra.Command{
 			return nil
 		}
 		if _, err := config.Load(); err != nil {
-			return fmt.Errorf("no config found -- run `n setup`. You can edit your config at %s", config.Path())
+			return fmt.Errorf("no config found -- run `nora setup`. You can edit your config at %s", config.Path())
 		}
 		return nil
 	},

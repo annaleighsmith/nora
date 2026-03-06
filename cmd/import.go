@@ -21,12 +21,12 @@ var importCmd = &cobra.Command{
 	Short: "Import markdown notes with AI formatting",
 	Long: `Import .md files with AI-generated frontmatter. Accepts files and/or directories.
 
-  n import file.md                     single file, AI names it
-  n import file.md my-name.md          single file, you name it
-  n import a.md b.md c.md              multiple files
-  n import ~/old-notes/                directory (top-level only)
-  n import ~/old-notes/ -r             directory (recursive)
-  n import ~/old-notes/ -r -x Archive  recursive, skip Archive/`,
+  nora import file.md                     single file, AI names it
+  nora import file.md my-name.md          single file, you name it
+  nora import a.md b.md c.md              multiple files
+  nora import ~/old-notes/                directory (top-level only)
+  nora import ~/old-notes/ -r             directory (recursive)
+  nora import ~/old-notes/ -r -x Archive  recursive, skip Archive/`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runImport,
 }
@@ -198,7 +198,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		combined := frontmatter + "\n\n" + input
 		var newFilename string
 		if customName != "" {
-			newFilename = deduplicateFilename(dir, customName)
+			newFilename = deduplicateFilename(dir, generateFilenameFromSlug(frontmatter, customName))
 		} else {
 			newFilename = deduplicateFilename(dir, generateFilename(frontmatter))
 		}

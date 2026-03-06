@@ -34,7 +34,7 @@ func init() {
 func loadNotesDir() (string, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return "", fmt.Errorf("no config found — run `n setup` or create %s", config.Path())
+		return "", fmt.Errorf("no config found — run `nora setup` or create %s", config.Path())
 	}
 	return cfg.NotesDir, nil
 }

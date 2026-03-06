@@ -152,6 +152,30 @@ func generateFilename(content string) string {
 	return name + ".md"
 }
 
+// generateFilenameFromSlug uses a custom slug instead of extracting the title,
+// but still applies the configured naming convention (date, slug style).
+func generateFilenameFromSlug(content string, customName string) string {
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = config.DefaultConfig()
+	}
+
+	// Strip .md if provided
+	slug := strings.TrimSuffix(customName, ".md")
+	slug = slugify(slug, cfg.Format.SlugStyle)
+
+	date := extractDate(content)
+	if date == "" {
+		date = time.Now().Format(cfg.Format.DateFormat)
+	}
+
+	name := cfg.Format.Naming
+	name = strings.ReplaceAll(name, "{date}", date)
+	name = strings.ReplaceAll(name, "{slug}", slug)
+
+	return name + ".md"
+}
+
 func extractDate(content string) string {
 	for _, line := range strings.Split(content, "\n") {
 		if strings.HasPrefix(line, "date:") {
