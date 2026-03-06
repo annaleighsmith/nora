@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"n-notes/config"
@@ -25,8 +26,12 @@ func init() {
 	rootCmd.AddCommand(healthCmd)
 }
 
+var tw *tabwriter.Writer
+
 func runHealth(cmd *cobra.Command, args []string) error {
 	ok := true
+	tw = tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	defer tw.Flush()
 
 	// Config
 	cfg, err := config.Load()
@@ -134,6 +139,7 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		printStatus("Memories", true, "none yet")
 	}
 
+	tw.Flush()
 	fmt.Println()
 	if ok {
 		fmt.Println("All systems go.")
@@ -148,7 +154,7 @@ func printStatus(label string, ok bool, detail string) {
 	if !ok {
 		icon = "\033[31m✗\033[0m"
 	}
-	fmt.Printf("  %s %-14s %s\n", icon, label, detail)
+	fmt.Fprintf(tw, "  %s\t%s\t%s\n", icon, label, detail)
 }
 
 func expandHome(path string) string {

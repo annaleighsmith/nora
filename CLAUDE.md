@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`n` is a self-hosted, terminal-first note-taking tool written in Go. Single binary that provides both a CLI (neovim-based editing, ripgrep search, fzf selection) and an embedded web server (mobile UI via Tailscale). Claude API handles AI formatting of messy input and semantic querying across notes. Notes are plain markdown in a flat directory (`~/notes/`).
+Nora is a self-hosted, terminal-first note-taking tool with a personality. It's a single Go binary that turns messy thoughts into clean markdown, then gives you an AI assistant (named by you, configurable personality) who actually *knows* your notes — searching, reading, remembering across sessions, and getting sharper the more you use it. Plain markdown files, flat directory, no lock-in, no cloud — just your notes, your terminal, and an AI that feels like yours.
+
+This will be an open source GitHub project. The binary will be renamed from `n` to `nora`.
 
 ## Build & Run
 
@@ -38,7 +40,11 @@ main.go (entrypoint, CLI routing via cobra)
 - **Web stack**: `net/http` + `html/template` + HTMX + Pico CSS + CodeMirror
 - **Markdown rendering**: `github.com/yuin/goldmark`
 - **AI flow (`n add`)**: raw input -> Claude API formats -> save as markdown with YAML frontmatter
-- **AI flow (`n ask`)**: ripgrep keyword search -> read top matching files -> Claude API answers citing filenames -> stream response
+- **AI flow (`n ask`)**: multi-turn sessions with 5 tools (search, read, list_tags, list_recent, note_index) -> Claude streams answers citing filenames -> memories saved between sessions
+- **AI flow (`n import`)**: batch import with AI-generated frontmatter, inline tag extraction, mod-date preservation
+- **AI flow (`n tags add --ai`)**: ripgrep candidates filtered by AI for relevance
+- **Bot identity**: configurable name + personality in `[bot]` config, injected into system prompt
+- **Token tracking**: per-model usage with cache-aware cost calculation
 - **Backup**: git auto-commit goroutine in `n serve`, auto-generated commit messages
 
 ## Workflow — Learning Project
