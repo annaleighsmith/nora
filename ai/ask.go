@@ -17,8 +17,17 @@ import (
 
 const defaultAskPrompt = `You are a knowledge assistant with access to the user's personal notes.
 
-When the user asks a question, use the search_notes tool to find relevant notes. You can search multiple times with different queries to find all relevant information.
+You have these tools for discovering and reading notes:
+- search_notes: keyword search (prefix with # for tag search)
+- read_note: read a specific note (with optional offset/limit)
+- list_tags: see all tags in use — great starting point for broad questions
+- list_recent_notes: see recently modified notes — great for "what's new?" questions
+- note_index: compact list of ALL notes with titles and tags — use when search isn't finding what you need
 
+Strategy:
+- For specific questions, start with search_notes using keywords
+- For broad/vague questions, start with list_tags or note_index to orient yourself
+- For time-based questions ("lately", "recently"), use list_recent_notes
 - Prefix a query with # to search by tag (e.g. "#project")
 - Use specific keywords, not full sentences
 - Search multiple angles if the first search doesn't find enough
@@ -80,6 +89,41 @@ var readNoteTool = anthropic.ToolUnionParam{
 	},
 }
 
+var listTagsTool = anthropic.ToolUnionParam{
+	OfTool: &anthropic.ToolParam{
+		Name:        "list_tags",
+		Description: anthropic.String("List all tags in use across the user's notes, with counts. No parameters needed. Use this to discover what topics and categories exist before searching."),
+		InputSchema: anthropic.ToolInputSchemaParam{
+			Properties: map[string]any{},
+		},
+	},
+}
+
+var listRecentNotesTool = anthropic.ToolUnionParam{
+	OfTool: &anthropic.ToolParam{
+		Name:        "list_recent_notes",
+		Description: anthropic.String("List the most recently modified notes. Use this for vague or time-based questions like 'what have I been writing about?' or 'what's new?'"),
+		InputSchema: anthropic.ToolInputSchemaParam{
+			Properties: map[string]any{
+				"count": map[string]any{
+					"type":        "integer",
+					"description": "Number of recent notes to return (default 20, max 50).",
+				},
+			},
+		},
+	},
+}
+
+var noteIndexTool = anthropic.ToolUnionParam{
+	OfTool: &anthropic.ToolParam{
+		Name:        "note_index",
+		Description: anthropic.String("Get a compact index of ALL notes: filename, title, and tags. No content. Use this to get an overview of the entire vault or find notes when keyword search isn't working."),
+		InputSchema: anthropic.ToolInputSchemaParam{
+			Properties: map[string]any{},
+		},
+	},
+}
+
 // AskSession holds conversation state for multi-turn ask sessions.
 type AskSession struct {
 	messages   []anthropic.MessageParam
@@ -105,6 +149,15 @@ func NewAskSession(notesDir string) (*AskSession, error) {
 	promptTemplate, err := config.LoadPrompt("ask", defaultAskPrompt)
 	if err != nil {
 		return nil, err
+	}
+
+	// Inject bot identity if configured
+	if cfg.Bot.Name != "" {
+		identity := "\n\nYour name is " + cfg.Bot.Name + "."
+		if cfg.Bot.Personality != "" {
+			identity += " " + cfg.Bot.Personality
+		}
+		promptTemplate += identity
 	}
 
 	// Load existing memories into the system prompt
@@ -136,7 +189,7 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 			System: []anthropic.TextBlockParam{
 				{Text: s.prompt},
 			},
-			Tools:    []anthropic.ToolUnionParam{searchNotesTool, readNoteTool},
+			Tools:    []anthropic.ToolUnionParam{searchNotesTool, readNoteTool, listTagsTool, listRecentNotesTool, noteIndexTool},
 			Messages: s.messages,
 		})
 
@@ -263,6 +316,40 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 				contentLines := len(strings.Split(content, "\n"))
 				fmt.Fprintf(os.Stderr, " (%d lines)\033[0m\n", contentLines)
 				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, content, false))
+
+			case "list_tags":
+				fmt.Fprintf(os.Stderr, "\033[2mListing tags...\033[0m\n")
+				result, err := notes.ListTags(s.notesDir)
+				if err != nil {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
+					continue
+				}
+				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
+
+			case "list_recent_notes":
+				var input struct {
+					Count int `json:"count"`
+				}
+				json.Unmarshal(rawInput, &input)
+				if input.Count <= 0 {
+					input.Count = 20
+				}
+				fmt.Fprintf(os.Stderr, "\033[2mListing %d recent notes...\033[0m\n", input.Count)
+				result, err := notes.ListRecentNotes(s.notesDir, input.Count)
+				if err != nil {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
+					continue
+				}
+				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
+
+			case "note_index":
+				fmt.Fprintf(os.Stderr, "\033[2mBuilding note index...\033[0m\n")
+				result, err := notes.NoteIndex(s.notesDir)
+				if err != nil {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
+					continue
+				}
+				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
 			}
 		}
 

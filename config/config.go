@@ -21,10 +21,16 @@ type ModelConfig struct {
 	Heavy string `toml:"heavy"` // high-reasoning tasks: ask, query (default: sonnet)
 }
 
+type BotConfig struct {
+	Name        string `toml:"name"`
+	Personality string `toml:"personality"`
+}
+
 type Config struct {
 	NotesDir string       `toml:"notes_dir"`
 	Format   FormatConfig `toml:"format"`
 	Models   ModelConfig  `toml:"models"`
+	Bot      BotConfig    `toml:"bot"`
 }
 
 // ModelAliases maps friendly names to full model IDs.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -87,6 +88,169 @@ func countFileLines(path string) int {
 		return 0
 	}
 	return len(strings.Split(string(data), "\n"))
+}
+
+// ListTags scans all notes for YAML frontmatter tags and returns a sorted, deduplicated list.
+func ListTags(notesDir string) (string, error) {
+	// Use rg to extract tag lines from frontmatter
+	cmd := exec.Command("rg", "--no-messages", "--no-filename",
+		`^\s*-\s+\S+`, notesDir) // matches "  - tagname" lines in frontmatter
+	out, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return "no tags found", nil
+		}
+		return "", fmt.Errorf("ripgrep error: %w", err)
+	}
+
+	seen := make(map[string]int)
+	for _, line := range strings.Split(string(out), "\n") {
+		tag := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-•"))
+		tag = strings.TrimSpace(tag)
+		if tag != "" && !strings.Contains(tag, " ") && !strings.HasPrefix(tag, "#") {
+			seen[tag]++
+		}
+	}
+
+	if len(seen) == 0 {
+		return "no tags found", nil
+	}
+
+	type tagCount struct {
+		tag   string
+		count int
+	}
+	var tags []tagCount
+	for t, c := range seen {
+		tags = append(tags, tagCount{t, c})
+	}
+	sort.Slice(tags, func(i, j int) bool { return tags[i].tag < tags[j].tag })
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d unique tags:\n", len(tags))
+	for _, tc := range tags {
+		fmt.Fprintf(&sb, "- %s (%d notes)\n", tc.tag, tc.count)
+	}
+	return sb.String(), nil
+}
+
+// ListRecentNotes returns the most recent notes by modification time.
+func ListRecentNotes(notesDir string, count int) (string, error) {
+	entries, err := os.ReadDir(notesDir)
+	if err != nil {
+		return "", fmt.Errorf("could not read notes dir: %w", err)
+	}
+
+	type noteInfo struct {
+		name    string
+		modTime int64
+	}
+	var notes []noteInfo
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		notes = append(notes, noteInfo{e.Name(), info.ModTime().Unix()})
+	}
+
+	sort.Slice(notes, func(i, j int) bool { return notes[i].modTime > notes[j].modTime })
+
+	if count <= 0 || count > len(notes) {
+		count = len(notes)
+	}
+	if count > 50 {
+		count = 50
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%d most recent notes (of %d total):\n", count, len(notes))
+	for i := 0; i < count; i++ {
+		fmt.Fprintf(&sb, "- %s\n", notes[i].name)
+	}
+	return sb.String(), nil
+}
+
+// NoteIndex returns a compact summary of all notes: filename, title, and tags.
+func NoteIndex(notesDir string) (string, error) {
+	entries, err := os.ReadDir(notesDir)
+	if err != nil {
+		return "", fmt.Errorf("could not read notes dir: %w", err)
+	}
+
+	var sb strings.Builder
+	noteCount := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		noteCount++
+		data, err := os.ReadFile(filepath.Join(notesDir, e.Name()))
+		if err != nil {
+			continue
+		}
+
+		title, tags := extractFrontmatterMeta(string(data))
+		line := e.Name()
+		if title != "" {
+			line += " | " + title
+		}
+		if tags != "" {
+			line += " [" + tags + "]"
+		}
+		fmt.Fprintf(&sb, "%s\n", line)
+	}
+
+	header := fmt.Sprintf("%d notes in vault:\n", noteCount)
+	return header + sb.String(), nil
+}
+
+// extractFrontmatterMeta pulls title and tags from YAML frontmatter.
+func extractFrontmatterMeta(content string) (title, tags string) {
+	if !strings.HasPrefix(content, "---") {
+		return "", ""
+	}
+	end := strings.Index(content[3:], "---")
+	if end == -1 {
+		return "", ""
+	}
+	fm := content[3 : 3+end]
+
+	var tagList []string
+	inTags := false
+	for _, line := range strings.Split(fm, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "title:") {
+			title = strings.TrimSpace(strings.TrimPrefix(trimmed, "title:"))
+			title = strings.Trim(title, "\"'")
+		} else if strings.HasPrefix(trimmed, "tags:") {
+			inTags = true
+			// inline tags: tags: [a, b] or tags: a, b
+			after := strings.TrimSpace(strings.TrimPrefix(trimmed, "tags:"))
+			if after != "" {
+				after = strings.Trim(after, "[]")
+				for _, t := range strings.Split(after, ",") {
+					t = strings.TrimSpace(t)
+					if t != "" {
+						tagList = append(tagList, t)
+					}
+				}
+				inTags = false
+			}
+		} else if inTags && strings.HasPrefix(trimmed, "-") {
+			tag := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
+			if tag != "" {
+				tagList = append(tagList, tag)
+			}
+		} else if inTags && trimmed != "" {
+			inTags = false
+		}
+	}
+
+	return title, strings.Join(tagList, ", ")
 }
 
 // ReadNote reads a note by filename from the notes dir.
