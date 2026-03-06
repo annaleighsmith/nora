@@ -372,8 +372,16 @@ func mergeTagsIntoFrontmatter(frontmatter string, newTags []string) string {
 }
 
 // deduplicateFilename appends -2, -3, etc. if a file with the same name
-// already exists in dir.
-func deduplicateFilename(dir, filename string) string {
+// already exists in dir. If skipName is provided, that name is not considered a conflict.
+func deduplicateFilename(dir, filename string, skipName ...string) string {
+	skip := ""
+	if len(skipName) > 0 {
+		skip = skipName[0]
+	}
+
+	if filename == skip {
+		return filename
+	}
 	dest := filepath.Join(dir, filename)
 	if _, err := os.Stat(dest); err != nil {
 		return filename
@@ -381,10 +389,14 @@ func deduplicateFilename(dir, filename string) string {
 
 	ext := filepath.Ext(filename)
 	base := strings.TrimSuffix(filename, ext)
-	for i := 2; ; i++ {
+	for i := 2; i < 100; i++ {
 		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
+		if candidate == skip {
+			return candidate
+		}
 		if _, err := os.Stat(filepath.Join(dir, candidate)); err != nil {
 			return candidate
 		}
 	}
+	return filename
 }
