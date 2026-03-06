@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
 	"n-notes/config"
 	"n-notes/notes"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
+
 
 const defaultAskPrompt = `You are a knowledge assistant with access to the user's personal notes.
 
@@ -33,10 +33,9 @@ Strategy:
 - Search multiple angles if the first search doesn't find enough
 
 When using read_note:
-- Search results show each file's total line count. Use this to budget your reads.
-- Try to stay under 500 total lines read across all read_note calls.
-- For long files (100+ lines), use offset/limit to read only the relevant section rather than the whole file.
-- You often don't need to read full files — the search context is usually enough.
+- You have a hard read budget per question. Each read is capped so you can't spend it all on one file.
+- Before reading a long file, make sure it's worth the cost. Use search context and file length to judge relevance first.
+- Spread your reads across multiple relevant notes rather than going deep on one.
 
 When answering:
 - Use bullet points, never numbered lists
@@ -126,12 +125,14 @@ var noteIndexTool = anthropic.ToolUnionParam{
 
 // AskSession holds conversation state for multi-turn ask sessions.
 type AskSession struct {
-	messages   []anthropic.MessageParam
-	client     anthropic.Client
-	prompt     string
-	model      anthropic.Model
-	lightModel anthropic.Model
-	notesDir   string
+	messages    []anthropic.MessageParam
+	client      anthropic.Client
+	prompt      string
+	model       anthropic.Model
+	lightModel  anthropic.Model
+	notesDir    string
+	readBudget  int
+	linesRead   int
 }
 
 // NewAskSession creates a new conversational ask session.
@@ -172,12 +173,14 @@ func NewAskSession(notesDir string) (*AskSession, error) {
 		model:      anthropic.Model(config.ResolveModel(cfg.Models.Heavy)),
 		lightModel: anthropic.Model(config.ResolveModel(cfg.Models.Light)),
 		notesDir:   notesDir,
+		readBudget: cfg.Bot.AskReadBudget,
 	}, nil
 }
 
 // Ask sends a question (or follow-up) and returns cited files.
 // Conversation history is preserved between calls.
 func (s *AskSession) Ask(question string) ([]string, error) {
+	s.linesRead = 0
 	s.messages = append(s.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(question)))
 
 	ctx := context.Background()
@@ -208,12 +211,14 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 			switch event.Type {
 			case "message_start":
 				msg := event.AsMessageStart()
-				Usage.Add(string(s.model), msg.Message.Usage.InputTokens, 0)
+				u := msg.Message.Usage
+				Usage.Add(string(s.model), u.InputTokens, 0, u.CacheCreationInputTokens, u.CacheReadInputTokens)
 
 			case "message_delta":
 				delta := event.AsMessageDelta()
 				stopReason = delta.Delta.StopReason
-				Usage.Add(string(s.model), 0, delta.Usage.OutputTokens)
+				u := delta.Usage
+				Usage.Add(string(s.model), 0, u.OutputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens)
 
 			case "content_block_start":
 				cb := event.ContentBlock
@@ -305,6 +310,31 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 					continue
 				}
 
+				remaining := s.readBudget - s.linesRead
+				if remaining <= 0 {
+					fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Read budget exhausted (%d/%d lines)\033[0m\n", s.linesRead, s.readBudget)
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID,
+						"Read budget exhausted. You have enough context — answer the question now. Do not attempt more reads.", false))
+					continue
+				}
+
+				// Cap per-read to half the total budget so one file can't starve the rest
+				maxPerRead := s.readBudget / 2
+				if maxPerRead < 50 {
+					maxPerRead = 50
+				}
+				// Also cap to remaining budget (minus 1 for ReadNote header line)
+				cap := remaining - 1
+				if cap < 1 {
+					cap = 1
+				}
+				if maxPerRead > cap {
+					maxPerRead = cap
+				}
+				if input.Limit <= 0 || input.Limit > maxPerRead {
+					input.Limit = maxPerRead
+				}
+
 				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Reading %s", input.Filename)
 				if input.Offset > 0 || input.Limit > 0 {
 					fmt.Fprintf(os.Stderr, " [offset:%d limit:%d]", input.Offset, input.Limit)
@@ -317,7 +347,8 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 					continue
 				}
 				contentLines := len(strings.Split(content, "\n"))
-				fmt.Fprintf(os.Stderr, " (%d lines)\033[0m\n", contentLines)
+				s.linesRead += contentLines
+				fmt.Fprintf(os.Stderr, " (%d lines, %d/%d budget)\033[0m\n", contentLines, s.linesRead, s.readBudget)
 				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, content, false))
 
 			case "list_tags":
@@ -430,7 +461,7 @@ func (s *AskSession) SaveMemories() {
 		return
 	}
 
-	Usage.Add(string(s.model), resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	Usage.Add(string(s.model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
 
 	var newMemories string
 	for _, block := range resp.Content {
@@ -469,7 +500,7 @@ func (s *AskSession) SaveMemories() {
 		return
 	}
 
-	Usage.Add(string(s.lightModel), consResp.Usage.InputTokens, consResp.Usage.OutputTokens)
+	Usage.Add(string(s.lightModel), consResp.Usage.InputTokens, consResp.Usage.OutputTokens, consResp.Usage.CacheCreationInputTokens, consResp.Usage.CacheReadInputTokens)
 
 	var consolidated string
 	for _, block := range consResp.Content {

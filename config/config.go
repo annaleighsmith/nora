@@ -22,8 +22,9 @@ type ModelConfig struct {
 }
 
 type BotConfig struct {
-	Name        string `toml:"name"`
-	Personality string `toml:"personality"`
+	Name          string `toml:"name"`
+	Personality   string `toml:"personality"`
+	AskReadBudget int    `toml:"ask_read_budget"`
 }
 
 type Config struct {
@@ -53,6 +54,9 @@ func DefaultConfig() Config {
 		Models: ModelConfig{
 			Light: "haiku",
 			Heavy: "sonnet",
+		},
+		Bot: BotConfig{
+			AskReadBudget: 500,
 		},
 	}
 }
@@ -110,6 +114,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Models.Heavy == "" {
 		cfg.Models.Heavy = defaults.Models.Heavy
+	}
+	if cfg.Bot.AskReadBudget <= 0 {
+		cfg.Bot.AskReadBudget = defaults.Bot.AskReadBudget
 	}
 
 	return cfg, nil

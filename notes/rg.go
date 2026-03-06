@@ -92,23 +92,29 @@ func countFileLines(path string) int {
 
 // ListTags scans all notes for YAML frontmatter tags and returns a sorted, deduplicated list.
 func ListTags(notesDir string) (string, error) {
-	// Use rg to extract tag lines from frontmatter
-	cmd := exec.Command("rg", "--no-messages", "--no-filename",
-		`^\s*-\s+\S+`, notesDir) // matches "  - tagname" lines in frontmatter
-	out, err := cmd.Output()
+	entries, err := os.ReadDir(notesDir)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return "no tags found", nil
-		}
-		return "", fmt.Errorf("ripgrep error: %w", err)
+		return "", fmt.Errorf("could not read notes dir: %w", err)
 	}
 
 	seen := make(map[string]int)
-	for _, line := range strings.Split(string(out), "\n") {
-		tag := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-•"))
-		tag = strings.TrimSpace(tag)
-		if tag != "" && !strings.Contains(tag, " ") && !strings.HasPrefix(tag, "#") {
-			seen[tag]++
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(notesDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		_, tagsStr := extractFrontmatterMeta(string(data))
+		if tagsStr == "" {
+			continue
+		}
+		for _, t := range strings.Split(tagsStr, ", ") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				seen[t]++
+			}
 		}
 	}
 
@@ -129,7 +135,7 @@ func ListTags(notesDir string) (string, error) {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%d unique tags:\n", len(tags))
 	for _, tc := range tags {
-		fmt.Fprintf(&sb, "- %s (%d notes)\n", tc.tag, tc.count)
+		fmt.Fprintf(&sb, "- %s (%d)\n", tc.tag, tc.count)
 	}
 	return sb.String(), nil
 }

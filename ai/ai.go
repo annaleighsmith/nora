@@ -88,7 +88,7 @@ func Format(rawInput string, originalFilename string) (string, error) {
 		return "", fmt.Errorf("claude API error: %w", err)
 	}
 
-	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
 
 	for _, block := range resp.Content {
 		if block.Type == "text" {
@@ -157,7 +157,7 @@ func GenerateFrontmatter(fullContent string, originalFilename string) (string, e
 		return "", fmt.Errorf("claude API error: %w", err)
 	}
 
-	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
 
 	for _, block := range resp.Content {
 		if block.Type == "text" {
@@ -165,6 +165,42 @@ func GenerateFrontmatter(fullContent string, originalFilename string) (string, e
 		}
 	}
 
+	return "", fmt.Errorf("no text in API response")
+}
+
+// QuickQuery sends a one-shot prompt to the light model and returns the text response.
+func QuickQuery(prompt string) (string, error) {
+	key := os.Getenv("ANTHROPIC_API_KEY")
+	if key == "" {
+		return "", fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return "", fmt.Errorf("could not load config: %w", err)
+	}
+
+	client := anthropic.NewClient()
+	model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
+
+	resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
+		Model:     model,
+		MaxTokens: 1024,
+		Messages: []anthropic.MessageParam{
+			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("claude API error: %w", err)
+	}
+
+	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
+
+	for _, block := range resp.Content {
+		if block.Type == "text" {
+			return block.Text, nil
+		}
+	}
 	return "", fmt.Errorf("no text in API response")
 }
 
