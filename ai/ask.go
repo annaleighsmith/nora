@@ -285,7 +285,7 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 					continue
 				}
 
-				fmt.Fprintf(os.Stderr, "\033[2mSearching for %q...\033[0m\n", input.Query)
+				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Searching for %q...\033[0m\n", input.Query)
 
 				result, err := notes.SearchNotes(s.notesDir, input.Query)
 				if err != nil {
@@ -305,7 +305,7 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 					continue
 				}
 
-				fmt.Fprintf(os.Stderr, "\033[2mReading %s", input.Filename)
+				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Reading %s", input.Filename)
 				if input.Offset > 0 || input.Limit > 0 {
 					fmt.Fprintf(os.Stderr, " [offset:%d limit:%d]", input.Offset, input.Limit)
 				}
@@ -321,7 +321,7 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, content, false))
 
 			case "list_tags":
-				fmt.Fprintf(os.Stderr, "\033[2mListing tags...\033[0m\n")
+				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Listing tags...\033[0m\n")
 				result, err := notes.ListTags(s.notesDir)
 				if err != nil {
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
@@ -337,7 +337,7 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 				if input.Count <= 0 {
 					input.Count = 20
 				}
-				fmt.Fprintf(os.Stderr, "\033[2mListing %d recent notes...\033[0m\n", input.Count)
+				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Listing %d recent notes...\033[0m\n", input.Count)
 				result, err := notes.ListRecentNotes(s.notesDir, input.Count)
 				if err != nil {
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
@@ -346,7 +346,7 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
 
 			case "note_index":
-				fmt.Fprintf(os.Stderr, "\033[2mBuilding note index...\033[0m\n")
+				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Building note index...\033[0m\n")
 				result, err := notes.NoteIndex(s.notesDir)
 				if err != nil {
 					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
@@ -412,7 +412,7 @@ func (s *AskSession) SaveMemories() {
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "\033[2mSaving memories...\033[0m\n")
+	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Saving memories...\033[0m\n")
 
 	// Ask the light model to extract memories from the conversation
 	memMessages := make([]anthropic.MessageParam, len(s.messages))
@@ -441,7 +441,7 @@ func (s *AskSession) SaveMemories() {
 	}
 
 	if newMemories == "" || strings.ToLower(newMemories) == "none" {
-		fmt.Fprintf(os.Stderr, "\033[2mNo new memories to save.\033[0m\n")
+		fmt.Fprintf(os.Stderr, "\033[2m[TOOL] No new memories to save.\033[0m\n")
 		return
 	}
 
@@ -465,7 +465,7 @@ func (s *AskSession) SaveMemories() {
 	if err != nil {
 		// If consolidation fails, just save the raw append
 		os.WriteFile(memoriesPath(), []byte(allMemories), 0644)
-		fmt.Fprintf(os.Stderr, "\033[2mSaved memory (consolidation failed).\033[0m\n")
+		fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Saved memory (consolidation failed).\033[0m\n")
 		return
 	}
 
@@ -492,5 +492,5 @@ func (s *AskSession) SaveMemories() {
 			count++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "\033[2m%d memory(s) total.\033[0m\n", count)
+	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] %d memory(s) total.\033[0m\n", count)
 }
