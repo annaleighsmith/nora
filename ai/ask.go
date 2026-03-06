@@ -241,6 +241,9 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 					assistantBlocks = append(assistantBlocks, anthropic.NewTextBlock(currentText))
 					fullAnswer += currentText
 				case "tool_use":
+					if currentToolInput == "" {
+						currentToolInput = "{}"
+					}
 					assistantBlocks = append(assistantBlocks,
 						anthropic.NewToolUseBlock(currentToolID, json.RawMessage(currentToolInput), currentToolName))
 					currentToolName = ""
@@ -397,13 +400,11 @@ func loadMemories() string {
 	return strings.TrimSpace(string(data))
 }
 
-const memoryPrompt = `Review the conversation above. Extract only the most essential memory that would help answer future questions faster — one concise bullet point.
+const memoryPrompt = `Extract one concise memory from this conversation that would help you answer future questions faster. Stick to what you observed — don't interpret or assume beyond what was directly in the notes.
 
-Good memories: "2026-02-20-valentine.md is a love letter to Keith, deeply personal and romantic"
-Bad memories: restating details from the note, or things obvious from the filename/tags.
+Return a single bullet point, or "none" if nothing new was learned. Do not repeat existing memories.`
 
-Return a single bullet point. If you learned nothing new or useful, return "none".
-Do not repeat memories that already exist.`
+const consolidatePrompt = `Here are saved memories from previous sessions. Consolidate them: remove duplicates, keep the best version of each topic. Return only bullet points (- prefix), one per line. Do not add new information — just clean up what's here.`
 
 // SaveMemories extracts learnings from the session and appends to memories file.
 func (s *AskSession) SaveMemories() {
@@ -420,7 +421,7 @@ func (s *AskSession) SaveMemories() {
 
 	ctx := context.Background()
 	resp, err := s.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     s.lightModel,
+		Model:     s.model,
 		MaxTokens: 512,
 		Messages:  memMessages,
 	})
@@ -429,7 +430,7 @@ func (s *AskSession) SaveMemories() {
 		return
 	}
 
-	Usage.Add(string(s.lightModel), resp.Usage.InputTokens, resp.Usage.OutputTokens)
+	Usage.Add(string(s.model), resp.Usage.InputTokens, resp.Usage.OutputTokens)
 
 	var newMemories string
 	for _, block := range resp.Content {
@@ -444,21 +445,52 @@ func (s *AskSession) SaveMemories() {
 		return
 	}
 
-	// Count memories (bullet points)
+	// Append new memory to existing ones
+	existing := loadMemories()
+	allMemories := existing
+	if allMemories != "" {
+		allMemories += "\n"
+	}
+	allMemories += newMemories
+
+	// Consolidate with light model to dedupe
+	consolidateMessages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock(consolidatePrompt + "\n\n" + allMemories)),
+	}
+	consResp, err := s.client.Messages.New(ctx, anthropic.MessageNewParams{
+		Model:     s.lightModel,
+		MaxTokens: 1024,
+		Messages:  consolidateMessages,
+	})
+	if err != nil {
+		// If consolidation fails, just save the raw append
+		os.WriteFile(memoriesPath(), []byte(allMemories), 0644)
+		fmt.Fprintf(os.Stderr, "\033[2mSaved memory (consolidation failed).\033[0m\n")
+		return
+	}
+
+	Usage.Add(string(s.lightModel), consResp.Usage.InputTokens, consResp.Usage.OutputTokens)
+
+	var consolidated string
+	for _, block := range consResp.Content {
+		if block.Type == "text" {
+			consolidated = strings.TrimSpace(block.Text)
+			break
+		}
+	}
+
+	if consolidated == "" {
+		consolidated = allMemories
+	}
+
+	os.WriteFile(memoriesPath(), []byte(consolidated+"\n"), 0644)
+
+	// Count final memories
 	count := 0
-	for _, line := range strings.Split(newMemories, "\n") {
+	for _, line := range strings.Split(consolidated, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "-") || strings.HasPrefix(strings.TrimSpace(line), "•") {
 			count++
 		}
 	}
-
-	// Append to memories file
-	f, err := os.OpenFile(memoriesPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	fmt.Fprintf(f, "\n%s\n", newMemories)
-
-	fmt.Fprintf(os.Stderr, "\033[2mSaved %d new memory(s).\033[0m\n", count)
+	fmt.Fprintf(os.Stderr, "\033[2m%d memory(s) total.\033[0m\n", count)
 }
