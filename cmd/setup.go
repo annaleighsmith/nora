@@ -13,16 +13,20 @@ import (
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Set up n with your notes directory",
+	Short: "Set up n with your notes directory for nnotes",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		reader := bufio.NewReader(os.Stdin)
 
-		fmt.Print("Where do you want to store your notes? ")
+		defaultDir := config.DefaultConfig().NotesDir
+		fmt.Printf("Where do you want to store your notes? [%s] ", defaultDir)
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return err
 		}
 		notesDir := strings.TrimSpace(input)
+		if notesDir == "" {
+			notesDir = defaultDir
+		}
 
 		// Expand ~ to home directory
 		if strings.HasPrefix(notesDir, "~/") {
@@ -44,12 +48,14 @@ var setupCmd = &cobra.Command{
 			fmt.Printf("Created %s\n", notesDir)
 		}
 
-		cfg := config.Config{NotesDir: notesDir}
+		cfg := config.DefaultConfig()
+		cfg.NotesDir = notesDir
 		if err := config.Save(cfg); err != nil {
 			return err
 		}
 
 		fmt.Printf("Config saved to %s\n", config.Path())
+		fmt.Printf("Prompts directory: %s\n", config.PromptsDir())
 		return nil
 	},
 }

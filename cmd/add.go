@@ -10,8 +10,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"n-notes/ai"
+	"n-notes/config"
+	"n-notes/notes"
 
 	"github.com/spf13/cobra"
 )
@@ -99,7 +102,7 @@ func formatAndSave(dir, input string) error {
 	}
 
 	fmt.Println("\nFormatting with Claude...")
-	formatted, err := ai.Format(input)
+	formatted, err := ai.Format(input, "")
 	if err != nil {
 		return err
 	}
@@ -108,9 +111,9 @@ func formatAndSave(dir, input string) error {
 	filename := generateFilename(formatted)
 	fullPath := filepath.Join(dir, filename)
 
-	fmt.Println("\n--- Preview ---")
-	fmt.Println(formatted)
-	fmt.Println("--- End Preview ---")
+	fmt.Println()
+	fmt.Println(notes.Render(formatted))
+
 	fmt.Printf("\nSave as %s? [y/N] ", filename)
 
 	reader := bufio.NewReader(os.Stdin)
@@ -129,27 +132,85 @@ func formatAndSave(dir, input string) error {
 }
 
 func generateFilename(content string) string {
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "title:") {
-			title := strings.TrimSpace(strings.TrimPrefix(line, "title:"))
-			title = strings.Trim(title, "\"'")
-			return time.Now().Format("2006-01-02") + "-" + slugify(title) + ".md"
-		}
+	cfg, err := config.Load()
+	if err != nil {
+		// Fall back to defaults if config can't be loaded
+		cfg = config.DefaultConfig()
 	}
-	return time.Now().Format("2006-01-02") + "-note.md"
+
+	title := extractTitle(content)
+	date := extractDate(content)
+	if date == "" {
+		date = time.Now().Format(cfg.Format.DateFormat)
+	}
+	slug := slugify(title, cfg.Format.SlugStyle)
+
+	name := cfg.Format.Naming
+	name = strings.ReplaceAll(name, "{date}", date)
+	name = strings.ReplaceAll(name, "{slug}", slug)
+
+	return name + ".md"
 }
 
-func slugify(s string) string {
+func extractDate(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, "date:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "date:"))
+		}
+	}
+	return ""
+}
+
+func extractTitle(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(line, "title:") {
+			title := strings.TrimSpace(strings.TrimPrefix(line, "title:"))
+			return strings.Trim(title, "\"'")
+		}
+	}
+	return "note"
+}
+
+func slugify(s string, style string) string {
+	switch style {
+	case "snake":
+		return slugifyWith(s, "_")
+	case "pascal":
+		return pascalize(s)
+	default: // "kebab"
+		return slugifyWith(s, "-")
+	}
+}
+
+func slugifyWith(s string, sep string) string {
 	s = strings.ToLower(s)
 	reg := regexp.MustCompile(`[^a-z0-9]+`)
-	s = reg.ReplaceAllString(s, "-")
-	s = strings.Trim(s, "-")
+	s = reg.ReplaceAllString(s, sep)
+	s = strings.Trim(s, sep)
 	if len(s) > 50 {
 		s = s[:50]
-		s = strings.TrimRight(s, "-")
+		s = strings.TrimRight(s, sep)
 	}
 	return s
+}
+
+func pascalize(s string) string {
+	reg := regexp.MustCompile(`[^a-zA-Z0-9]+`)
+	words := reg.Split(s, -1)
+	var result strings.Builder
+	for _, w := range words {
+		if w == "" {
+			continue
+		}
+		runes := []rune(w)
+		runes[0] = unicode.ToUpper(runes[0])
+		result.WriteString(string(runes))
+	}
+	out := result.String()
+	if len(out) > 50 {
+		out = out[:50]
+	}
+	return out
 }
 
 func stripCodeFences(s string) string {
