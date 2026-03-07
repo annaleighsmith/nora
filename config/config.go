@@ -71,7 +71,7 @@ func ResolveModel(name string) string {
 
 func Dir() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "nnotes")
+	return filepath.Join(home, ".config", "nora")
 }
 
 func Path() string {
@@ -135,7 +135,7 @@ func Save(cfg Config) error {
 	return toml.NewEncoder(f).Encode(cfg)
 }
 
-// LoadPrompt reads a prompt file from ~/.config/nnotes/prompts/<name>.md.
+// LoadPrompt reads a prompt file from ~/.config/nora/prompts/<name>.md.
 // If the file doesn't exist, it writes the default and returns it.
 func LoadPrompt(name, defaultContent string) (string, error) {
 	path := filepath.Join(PromptsDir(), name+".md")

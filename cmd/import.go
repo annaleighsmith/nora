@@ -36,6 +36,8 @@ func init() {
 	importCmd.Flags().BoolP("force", "f", false, "Re-import previously imported files")
 	importCmd.Flags().BoolP("recursive", "r", false, "Recurse into subdirectories")
 	importCmd.Flags().StringSliceP("exclude", "x", nil, "Directories to skip (repeatable, e.g. -x Archive -x Templates)")
+	importCmd.InitDefaultHelpFlag()
+	importCmd.Flags().Lookup("help").Shorthand = ""
 }
 
 type importEntry struct {
@@ -173,7 +175,6 @@ func runImport(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		fmt.Printf("  Generating frontmatter...\n")
 		frontmatter, err := ai.GenerateFrontmatter(input, name)
 		if err != nil {
 			fmt.Printf("  WARNING: AI failed for %s, skipping: %v\n", name, err)

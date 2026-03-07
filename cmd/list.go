@@ -12,7 +12,7 @@ import (
 
 var listCmd = &cobra.Command{
 	Use:   "list [pattern]",
-	Short: "List notes in the vault",
+	Short: "List notes in the vault (alias: ls)",
 	Long: `List notes in the vault, like ls for your notes.
 
   nora list                  all notes
@@ -25,6 +25,7 @@ var listCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(listCmd)
+	rootCmd.Flags().BoolP("list", "l", false, "List notes in the vault")
 	listCmd.Flags().BoolP("time", "t", false, "Sort by modification time (newest first)")
 	listCmd.Flags().BoolP("reverse", "R", false, "Reverse sort order")
 }

@@ -1,4 +1,4 @@
-package notes
+package utils
 
 import (
 	"fmt"
@@ -11,22 +11,45 @@ import (
 	"github.com/charmbracelet/glamour/ansi"
 )
 
-// Pick opens fzf to select a note, with live ripgrep content search.
+// Pick opens fzf to select a note with fuzzy matching across filenames and content.
 // Returns the selected file path, or empty string if cancelled.
 func Pick(dir, query string, inline bool) (string, error) {
-	// Shell command for fzf reload: #tag searches frontmatter tags only
-	rgCmd := fmt.Sprintf(
-		`q={q}; if [ "${q#\#}" != "$q" ]; then tag="${q#\#}"; rg --files-with-matches --no-messages "tags:.*$tag|^\s*-\s*$tag" %s; else rg --files-with-matches --no-messages "$q" %s || ls %s/*.md; fi`,
-		dir, dir, dir)
-
 	self, _ := os.Executable()
 
+	// For #tag queries, use ripgrep to scope to matching files first
+	if query != "" && strings.HasPrefix(query, "#") {
+		return pickByTag(dir, query, inline, self)
+	}
+
+	// Build "path\tfilename — title and preview" lines for fuzzy matching
+	files, err := listNotes(dir)
+	if err != nil {
+		return "", err
+	}
+
+	var lines []string
+	for _, f := range files {
+		name := filepath.Base(f)
+		data, _ := os.ReadFile(f)
+		title, _ := extractFrontmatterMeta(string(data))
+		preview := FirstLines(dir, name, 2)
+		preview = strings.ReplaceAll(preview, "\n", " ")
+
+		display := name
+		if title != "" && title != name {
+			display = name + " — " + title
+		}
+		if preview != "" {
+			display += " | " + preview
+		}
+		// Format: full_path\tdisplay_text — fzf shows field 2+, returns field 1
+		lines = append(lines, f+"\t"+display)
+	}
+
 	fzfArgs := []string{
-		"--disabled",
-		"--delimiter", "/",
-		"--with-nth", "-1",
-		"--bind", "change:reload:" + rgCmd,
-		"--preview", fmt.Sprintf("%s _preview {}", self),
+		"--delimiter", "\t",
+		"--with-nth", "2",
+		"--preview", fmt.Sprintf("%s _preview {1}", self),
 		"--preview-window", "right:60%:wrap",
 	}
 
@@ -39,43 +62,42 @@ func Pick(dir, query string, inline bool) (string, error) {
 	}
 
 	fzf := exec.Command("fzf", fzfArgs...)
+	fzf.Stdin = strings.NewReader(strings.Join(lines, "\n"))
 	fzf.Stderr = os.Stderr
-
-	// Seed initial list: #tag scopes to frontmatter, otherwise full content search
-	if query != "" && strings.HasPrefix(query, "#") {
-		tag := strings.TrimPrefix(query, "#")
-		rg := exec.Command("rg", "--files-with-matches", "--no-messages",
-			"tags:.*"+tag+"|^\\s*-\\s*"+tag, dir)
-		out, _ := rg.Output()
-		if len(out) > 0 {
-			fzf.Stdin = strings.NewReader(string(out))
-		} else {
-			files, _ := listNotes(dir)
-			fzf.Stdin = strings.NewReader(strings.Join(files, "\n"))
-		}
-	} else if query != "" {
-		rg := exec.Command("rg", "--files-with-matches", "--no-messages", query, dir)
-		out, _ := rg.Output()
-		if len(out) > 0 {
-			fzf.Stdin = strings.NewReader(string(out))
-		} else {
-			files, _ := listNotes(dir)
-			fzf.Stdin = strings.NewReader(strings.Join(files, "\n"))
-		}
-	} else {
-		files, err := listNotes(dir)
-		if err != nil {
-			return "", err
-		}
-		fzf.Stdin = strings.NewReader(strings.Join(files, "\n"))
-	}
 
 	selected, err := fzf.Output()
 	if err != nil {
 		return "", nil
 	}
 
-	return strings.TrimSpace(string(selected)), nil
+	// Extract the path (first field before tab)
+	result := strings.TrimSpace(string(selected))
+	if i := strings.Index(result, "\t"); i != -1 {
+		result = result[:i]
+	}
+	return result, nil
+}
+
+// pickByTag handles #tag queries with ripgrep scoping.
+func pickByTag(dir, query string, inline bool, self string) (string, error) {
+	tag := strings.TrimPrefix(query, "#")
+	rg := exec.Command("rg", "--files-with-matches", "--no-messages",
+		"tags:.*"+tag+"|^\\s*-\\s*"+tag, dir)
+	out, _ := rg.Output()
+
+	var paths []string
+	if len(out) > 0 {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line != "" {
+				paths = append(paths, line)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		paths, _ = listNotes(dir)
+	}
+
+	return PickFrom(paths, inline)
 }
 
 // PickFrom opens fzf seeded with a specific list of file paths.
@@ -110,8 +132,48 @@ func PickFrom(paths []string, inline bool) (string, error) {
 	return strings.TrimSpace(string(selected)), nil
 }
 
-// Look picks a note with inline fzf and prints its content.
-func Look(dir, query string) error {
+// PickMultiFrom opens fzf in multi-select mode seeded with a specific list of file paths.
+// Returns selected file paths, or nil if cancelled.
+func PickMultiFrom(paths []string, inline bool) ([]string, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	self, _ := os.Executable()
+
+	fzfArgs := []string{
+		"--multi",
+		"--delimiter", "/",
+		"--with-nth", "-1",
+		"--preview", fmt.Sprintf("%s _preview {}", self),
+		"--preview-window", "right:60%:wrap",
+	}
+
+	if inline {
+		fzfArgs = append(fzfArgs, "--height=40%", "--layout=reverse")
+	}
+
+	fzf := exec.Command("fzf", fzfArgs...)
+	fzf.Stdin = strings.NewReader(strings.Join(paths, "\n"))
+	fzf.Stderr = os.Stderr
+
+	output, err := fzf.Output()
+	if err != nil {
+		return nil, nil
+	}
+
+	var selected []string
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			selected = append(selected, line)
+		}
+	}
+	return selected, nil
+}
+
+// Show picks a note with inline fzf and prints its content.
+func Show(dir, query string) error {
 	path, err := Pick(dir, query, true)
 	if err != nil || path == "" {
 		return err

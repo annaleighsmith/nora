@@ -14,7 +14,7 @@ import (
 
 	"n-notes/ai"
 	"n-notes/config"
-	"n-notes/notes"
+	"n-notes/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -112,7 +112,7 @@ func formatAndSave(dir, input string) error {
 	fullPath := filepath.Join(dir, filename)
 
 	fmt.Println()
-	fmt.Println(notes.Render(formatted))
+	fmt.Println(utils.Render(formatted))
 
 	fmt.Printf("\nSave as %s? [y/N] ", filename)
 

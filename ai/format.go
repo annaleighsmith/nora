@@ -12,7 +12,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
-const defaultFormatPrompt = `You are a note formatting assistant. Take the user's raw input and return a clean, well-structured markdown note.
+const DefaultFormatPrompt = `You are a note formatting assistant. Take the user's raw input and return a clean, well-structured markdown note.
 
 Note conventions:
 %s
@@ -58,7 +58,7 @@ func Format(rawInput string, originalFilename string) (string, error) {
 		return "", fmt.Errorf("could not load config: %w", err)
 	}
 
-	promptTemplate, err := config.LoadPrompt("format", defaultFormatPrompt)
+	promptTemplate, err := config.LoadPrompt("format", DefaultFormatPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -99,7 +99,7 @@ func Format(rawInput string, originalFilename string) (string, error) {
 	return "", fmt.Errorf("no text in API response")
 }
 
-const defaultFrontmatterPrompt = `You are a note metadata assistant. Given a filename and a preview of a markdown note, generate ONLY the YAML frontmatter block for it.
+const DefaultFrontmatterPrompt = `You are a note metadata assistant. Given a filename and a preview of a markdown note, generate ONLY the YAML frontmatter block for it.
 
 Conventions:
 %s
@@ -126,7 +126,7 @@ func GenerateFrontmatter(fullContent string, originalFilename string) (string, e
 		return "", fmt.Errorf("could not load config: %w", err)
 	}
 
-	promptTemplate, err := config.LoadPrompt("frontmatter", defaultFrontmatterPrompt)
+	promptTemplate, err := config.LoadPrompt("frontmatter", DefaultFrontmatterPrompt)
 	if err != nil {
 		return "", err
 	}

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"n-notes/ai"
-	"n-notes/notes"
+	"n-notes/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -36,7 +36,7 @@ func runTagsList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	result, err := notes.ListTags(dir)
+	result, err := utils.ListTags(dir)
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func runTagsAdd(cmd *cobra.Command, args []string) error {
 	useAI, _ := cmd.Flags().GetBool("ai")
 
 	// Find candidate notes: match content but don't already have the tag
-	candidates, err := notes.FindUntagged(dir, tag)
+	candidates, err := utils.FindUntagged(dir, tag)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func runTagsAdd(cmd *cobra.Command, args []string) error {
 
 	added := 0
 	for _, name := range candidates {
-		if err := notes.AddTag(dir, name, tag); err != nil {
+		if err := utils.AddTag(dir, name, tag); err != nil {
 			fmt.Fprintf(os.Stderr, "  error tagging %s: %v\n", name, err)
 			continue
 		}
@@ -105,7 +105,7 @@ func aiFilterCandidates(dir, tag string, candidates []string) ([]string, error) 
 	// Build a prompt with the candidate filenames + first lines
 	var sb strings.Builder
 	for _, name := range candidates {
-		preview := notes.FirstLines(dir, name, 5)
+		preview := utils.FirstLines(dir, name, 5)
 		sb.WriteString(fmt.Sprintf("## %s\n%s\n\n", name, preview))
 	}
 

@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"n-notes/ai"
 	"n-notes/config"
 
 	"github.com/spf13/cobra"
@@ -13,8 +15,13 @@ import (
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Set up n with your notes directory for nnotes",
+	Short: "Set up nora with your notes directory",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		resetPrompts, _ := cmd.Flags().GetBool("reset-prompts")
+		if resetPrompts {
+			return runResetPrompts()
+		}
+
 		reader := bufio.NewReader(os.Stdin)
 
 		defaultDir := config.DefaultConfig().NotesDir
@@ -60,6 +67,35 @@ var setupCmd = &cobra.Command{
 	},
 }
 
+// promptDefaults maps prompt names to their default content.
+// Imported from the ai package constants.
+var promptDefaults = map[string]string{
+	"ask":         ai.DefaultAskPrompt,
+	"manage":      ai.DefaultManagePrompt,
+	"format":      ai.DefaultFormatPrompt,
+	"frontmatter": ai.DefaultFrontmatterPrompt,
+}
+
+func runResetPrompts() error {
+	dir := config.PromptsDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("could not create prompts directory: %w", err)
+	}
+
+	fmt.Println("Writing default prompts:")
+	for name, content := range promptDefaults {
+		path := filepath.Join(dir, name+".md")
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return fmt.Errorf("could not write %s: %w", name, err)
+		}
+		fmt.Printf("  %s.md\n", name)
+	}
+
+	fmt.Printf("\nPrompts reset to defaults at %s\n", dir)
+	return nil
+}
+
 func init() {
+	setupCmd.Flags().Bool("reset-prompts", false, "Reset all prompts to defaults")
 	rootCmd.AddCommand(setupCmd)
 }

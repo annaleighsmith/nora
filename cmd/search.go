@@ -5,16 +5,23 @@ import (
 	"strings"
 
 	"n-notes/config"
-	"n-notes/notes"
+	"n-notes/utils"
 
 	"github.com/spf13/cobra"
 )
 
-var lookCmd = &cobra.Command{
-	Use:   "look [query...]",
+var searchCmd = &cobra.Command{
+	Use:   "search [query...]",
+	Short: "Search note contents with ripgrep",
+	Args:  cobra.MinimumNArgs(1),
+	RunE:  runSearch,
+}
+
+var showCmd = &cobra.Command{
+	Use:   "show [query...]",
 	Short: "Find a note and print it",
 	Args:  cobra.ArbitraryArgs,
-	RunE:  runLook,
+	RunE:  runShow,
 }
 
 var editCmd = &cobra.Command{
@@ -25,9 +32,11 @@ var editCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(lookCmd)
+	rootCmd.AddCommand(searchCmd)
+	rootCmd.AddCommand(showCmd)
 	rootCmd.AddCommand(editCmd)
-	rootCmd.Flags().BoolP("look", "l", false, "Find a note and print it")
+	rootCmd.Flags().BoolP("search", "s", false, "Search note contents")
+	rootCmd.Flags().BoolP("show", "p", false, "Find a note and print it")
 	rootCmd.Flags().BoolP("edit", "e", false, "Find a note and edit it")
 }
 
@@ -39,12 +48,12 @@ func loadNotesDir() (string, error) {
 	return cfg.NotesDir, nil
 }
 
-func runLook(cmd *cobra.Command, args []string) error {
+func runShow(cmd *cobra.Command, args []string) error {
 	dir, err := loadNotesDir()
 	if err != nil {
 		return err
 	}
-	return notes.Look(dir, strings.Join(args, " "))
+	return utils.Show(dir, strings.Join(args, " "))
 }
 
 func runEdit(cmd *cobra.Command, args []string) error {
@@ -52,5 +61,19 @@ func runEdit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return notes.Open(dir, strings.Join(args, " "))
+	return utils.Open(dir, strings.Join(args, " "))
+}
+
+func runSearch(cmd *cobra.Command, args []string) error {
+	dir, err := loadNotesDir()
+	if err != nil {
+		return err
+	}
+	query := strings.Join(args, " ")
+	result, err := utils.SearchNotes(dir, query)
+	if err != nil {
+		return err
+	}
+	fmt.Print(result)
+	return nil
 }

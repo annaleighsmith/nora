@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"n-notes/notes"
+	"n-notes/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -19,7 +19,7 @@ var previewCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("could not read %s: %w", args[0], err)
 		}
-		fmt.Print(notes.Render(string(content)))
+		fmt.Print(utils.Render(string(content)))
 		return nil
 	},
 }

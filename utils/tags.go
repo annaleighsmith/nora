@@ -1,4 +1,4 @@
-package notes
+package utils
 
 import (
 	"fmt"
@@ -242,6 +242,61 @@ func AddTag(dir, name, tag string) error {
 			lines[i] = fmt.Sprintf("tags: %s, %s", after, tag)
 		} else {
 			lines[i] = fmt.Sprintf("tags: [%s]", tag)
+		}
+		break
+	}
+
+	if !found {
+		return fmt.Errorf("%s has no tags line in frontmatter", name)
+	}
+
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+}
+
+// RemoveTag removes a tag from a note's frontmatter.
+func RemoveTag(dir, name, tag string) error {
+	path := filepath.Join(dir, name)
+
+	// Auto-fix fences before modifying
+	FixFrontmatterFences(path)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	content := string(data)
+	lines := strings.Split(content, "\n")
+
+	found := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "tags:") {
+			continue
+		}
+		found = true
+		after := strings.TrimPrefix(trimmed, "tags:")
+		after = strings.TrimSpace(after)
+
+		bracketed := strings.HasPrefix(after, "[") && strings.HasSuffix(after, "]")
+		if bracketed {
+			after = strings.TrimSuffix(strings.TrimPrefix(after, "["), "]")
+		}
+
+		var kept []string
+		for _, t := range strings.Split(after, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" && strings.ToLower(t) != strings.ToLower(tag) {
+				kept = append(kept, t)
+			}
+		}
+
+		if len(kept) == 0 {
+			lines[i] = "tags: []"
+		} else if bracketed {
+			lines[i] = fmt.Sprintf("tags: [%s]", strings.Join(kept, ", "))
+		} else {
+			lines[i] = fmt.Sprintf("tags: %s", strings.Join(kept, ", "))
 		}
 		break
 	}

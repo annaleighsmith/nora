@@ -18,7 +18,7 @@ import (
 
 var healthCmd = &cobra.Command{
 	Use:   "health",
-	Short: "Check configuration, dependencies, and API connectivity",
+	Short: "Check config, deps, and API connectivity",
 	RunE:  runHealth,
 }
 

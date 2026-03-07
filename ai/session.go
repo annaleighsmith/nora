@@ -9,13 +9,13 @@ import (
 	"regexp"
 	"strings"
 	"n-notes/config"
-	"n-notes/notes"
+	"n-notes/utils"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )
 
 
-const defaultAskPrompt = `You are a knowledge assistant with access to the user's personal notes.
+const DefaultAskPrompt = `You are a knowledge assistant with access to the user's personal notes.
 
 You have these tools for discovering and reading notes:
 - search_notes: keyword search (prefix with # for tag search)
@@ -46,85 +46,50 @@ When answering:
 - Give a complete, final answer. Do not ask follow-up questions or offer to do more.
 - Do not add conversational filler like "Let me search" before tool calls — just call the tool.`
 
+const DefaultManagePrompt = `You are a vault management assistant with full read and write access to the user's notes.
+
+Read tools (use freely):
+- search_notes: keyword search (prefix with # for tag search)
+- read_note: read a specific note (with optional offset/limit)
+- list_tags: see all tags in use
+- list_recent_notes: see recently modified notes
+- note_index: compact list of ALL notes with titles and tags
+
+Write tools (require user confirmation before executing):
+- delete_notes: permanently delete notes
+- archive_notes: move notes to .archive/ (recoverable)
+- create_note: create a new note (AI formats with frontmatter)
+- add_tag: add a tag to notes
+- remove_tag: remove a tag from notes
+- fix_frontmatter: fix broken frontmatter fences
+
+Strategy:
+- Investigate thoroughly before proposing write actions
+- Use search, read, and index tools to find the right notes
+- When proposing writes, be specific about which files and why
+- For bulk operations (tagging, deleting), show the full list
+- If the user declines an action, adjust your approach
+
+When responding:
+- Use bullet points, never numbered lists
+- Cite note filenames so the user can verify
+- Be concise and direct
+- Do not add conversational filler before tool calls — just call the tool.`
+
 const maxToolCalls = 10
 
-var searchNotesTool = anthropic.ToolUnionParam{
-	OfTool: &anthropic.ToolParam{
-		Name:        "search_notes",
-		Description: anthropic.String("Search the user's notes using ripgrep. Returns matching filenames and context lines. Prefix query with # to search by tag."),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{
-				"query": map[string]any{
-					"type":        "string",
-					"description": "Search term. Use specific keywords, not full sentences. Prefix with # for tag search.",
-				},
-			},
-			Required: []string{"query"},
-		},
-	},
+// ConfirmResponse holds the user's response to a confirmation prompt.
+type ConfirmResponse struct {
+	Approved bool
+	Feedback string // non-empty when the user typed a revision instead of confirming
 }
 
-var readNoteTool = anthropic.ToolUnionParam{
-	OfTool: &anthropic.ToolParam{
-		Name:        "read_note",
-		Description: anthropic.String("Read content of a note by filename. Search results include total line counts per file — use that to decide whether to read the full file or a specific range. Omit offset/limit to read the entire note."),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{
-				"filename": map[string]any{
-					"type":        "string",
-					"description": "The note filename (e.g. 2025-10-23-diet.md)",
-				},
-				"offset": map[string]any{
-					"type":        "integer",
-					"description": "Start reading from this line number (0-based). Omit to start from the beginning.",
-				},
-				"limit": map[string]any{
-					"type":        "integer",
-					"description": "Maximum number of lines to return. Omit to read the entire note.",
-				},
-			},
-			Required: []string{"filename"},
-		},
-	},
-}
+// ConfirmFunc is called when a write tool needs user confirmation.
+// Enter (empty) = approved. Typed text = feedback for the AI to re-evaluate.
+type ConfirmFunc func(ToolResult) ConfirmResponse
 
-var listTagsTool = anthropic.ToolUnionParam{
-	OfTool: &anthropic.ToolParam{
-		Name:        "list_tags",
-		Description: anthropic.String("List all tags in use across the user's notes, with counts. No parameters needed. Use this to discover what topics and categories exist before searching."),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{},
-		},
-	},
-}
-
-var listRecentNotesTool = anthropic.ToolUnionParam{
-	OfTool: &anthropic.ToolParam{
-		Name:        "list_recent_notes",
-		Description: anthropic.String("List the most recently modified notes. Use this for vague or time-based questions like 'what have I been writing about?' or 'what's new?'"),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{
-				"count": map[string]any{
-					"type":        "integer",
-					"description": "Number of recent notes to return (default 20, max 50).",
-				},
-			},
-		},
-	},
-}
-
-var noteIndexTool = anthropic.ToolUnionParam{
-	OfTool: &anthropic.ToolParam{
-		Name:        "note_index",
-		Description: anthropic.String("Get a compact index of ALL notes: filename, title, and tags. No content. Use this to get an overview of the entire vault or find notes when keyword search isn't working."),
-		InputSchema: anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{},
-		},
-	},
-}
-
-// AskSession holds conversation state for multi-turn ask sessions.
-type AskSession struct {
+// Session holds conversation state for multi-turn ask/manage sessions.
+type Session struct {
 	messages    []anthropic.MessageParam
 	client      anthropic.Client
 	prompt      string
@@ -132,11 +97,13 @@ type AskSession struct {
 	lightModel  anthropic.Model
 	notesDir    string
 	readBudget  int
-	linesRead   int
+	tools       []anthropic.ToolUnionParam
+	handlers    map[string]ToolHandler
+	confirmFn   ConfirmFunc
 }
 
-// NewAskSession creates a new conversational ask session.
-func NewAskSession(notesDir string) (*AskSession, error) {
+// NewSession creates a new conversational ask session (read-only tools).
+func NewSession(notesDir string) (*Session, error) {
 	key := os.Getenv("ANTHROPIC_API_KEY")
 	if key == "" {
 		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
@@ -147,40 +114,92 @@ func NewAskSession(notesDir string) (*AskSession, error) {
 		return nil, fmt.Errorf("could not load config: %w", err)
 	}
 
-	promptTemplate, err := config.LoadPrompt("ask", defaultAskPrompt)
+	promptTemplate, err := config.LoadPrompt("ask", DefaultAskPrompt)
 	if err != nil {
 		return nil, err
 	}
 
-	// Inject bot identity if configured
-	if cfg.Bot.Name != "" {
-		identity := "\n\nYour name is " + cfg.Bot.Name + "."
-		if cfg.Bot.Personality != "" {
-			identity += " " + cfg.Bot.Personality
-		}
-		promptTemplate += identity
-	}
+	promptTemplate = injectIdentity(promptTemplate, cfg)
 
-	// Load existing memories into the system prompt
-	memories := loadMemories()
-	if memories != "" {
-		promptTemplate += "\n\nYour memories from previous sessions (use these to guide your searches):\n" + memories
-	}
+	tools, handlers := ReadOnlyTools()
 
-	return &AskSession{
+	return &Session{
 		client:     anthropic.NewClient(),
 		prompt:     promptTemplate,
 		model:      anthropic.Model(config.ResolveModel(cfg.Models.Heavy)),
 		lightModel: anthropic.Model(config.ResolveModel(cfg.Models.Light)),
 		notesDir:   notesDir,
 		readBudget: cfg.Bot.AskReadBudget,
+		tools:      tools,
+		handlers:   handlers,
 	}, nil
+}
+
+// NewManageSession creates a manage session with read + write tools.
+func NewManageSession(notesDir string, confirmFn ConfirmFunc) (*Session, error) {
+	key := os.Getenv("ANTHROPIC_API_KEY")
+	if key == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, fmt.Errorf("could not load config: %w", err)
+	}
+
+	promptTemplate, err := config.LoadPrompt("manage", DefaultManagePrompt)
+	if err != nil {
+		return nil, err
+	}
+
+	promptTemplate = injectIdentity(promptTemplate, cfg)
+
+	tools, handlers := AllTools()
+
+	return &Session{
+		client:     anthropic.NewClient(),
+		prompt:     promptTemplate,
+		model:      anthropic.Model(config.ResolveModel(cfg.Models.Heavy)),
+		lightModel: anthropic.Model(config.ResolveModel(cfg.Models.Light)),
+		notesDir:   notesDir,
+		readBudget: cfg.Bot.AskReadBudget,
+		tools:      tools,
+		handlers:   handlers,
+		confirmFn:  confirmFn,
+	}, nil
+}
+
+func injectIdentity(prompt string, cfg config.Config) string {
+	if cfg.Bot.Name != "" {
+		identity := "\n\nYour name is " + cfg.Bot.Name + "."
+		if cfg.Bot.Personality != "" {
+			identity += " " + cfg.Bot.Personality
+		}
+		prompt += identity
+	}
+
+	memories := loadMemories()
+	if memories != "" {
+		prompt += "\n\nYour memories from previous sessions (use these to guide your searches):\n" + memories
+	}
+
+	return prompt
+}
+
+// PreloadFile injects a file's content into the conversation as context
+// so the AI can answer questions about it without tool calls.
+func (s *Session) PreloadFile(filename, content string) {
+	msg := fmt.Sprintf("Here is the note %s:\n\n%s", filename, content)
+	s.messages = append(s.messages,
+		anthropic.NewUserMessage(anthropic.NewTextBlock(msg)),
+		anthropic.NewAssistantMessage(anthropic.NewTextBlock(fmt.Sprintf("I've read %s. What would you like to know?", filename))),
+	)
 }
 
 // Ask sends a question (or follow-up) and returns cited files.
 // Conversation history is preserved between calls.
-func (s *AskSession) Ask(question string) ([]string, error) {
-	s.linesRead = 0
+func (s *Session) Send(question string) ([]string, error) {
+	budget := &ReadBudget{Total: s.readBudget, Used: 0}
 	s.messages = append(s.messages, anthropic.NewUserMessage(anthropic.NewTextBlock(question)))
 
 	ctx := context.Background()
@@ -192,7 +211,7 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 			System: []anthropic.TextBlockParam{
 				{Text: s.prompt},
 			},
-			Tools:    []anthropic.ToolUnionParam{searchNotesTool, readNoteTool, listTagsTool, listRecentNotesTool, noteIndexTool},
+			Tools:    s.tools,
 			Messages: s.messages,
 		})
 
@@ -266,11 +285,11 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 		}
 
 		if stopReason != anthropic.StopReasonToolUse {
-			fmt.Println(notes.Render(fullAnswer))
+			fmt.Println(utils.Render(fullAnswer))
 			return extractCitedFiles(fullAnswer, s.notesDir), nil
 		}
 
-		// Process tool calls
+		// Process tool calls via handler dispatch
 		var toolResults []anthropic.ContentBlockParamUnion
 		for _, block := range assistantBlocks {
 			if block.OfToolUse == nil {
@@ -278,113 +297,40 @@ func (s *AskSession) Ask(question string) ([]string, error) {
 			}
 
 			toolID := block.OfToolUse.ID
+			toolName := block.OfToolUse.Name
 			rawInput := block.OfToolUse.Input.(json.RawMessage)
 
-			switch block.OfToolUse.Name {
-			case "search_notes":
-				var input struct {
-					Query string `json:"query"`
-				}
-				if err := json.Unmarshal(rawInput, &input); err != nil {
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("invalid input: %v", err), true))
-					continue
-				}
-
-				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Searching for %q...\033[0m\n", input.Query)
-
-				result, err := notes.SearchNotes(s.notesDir, input.Query)
-				if err != nil {
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("search error: %v", err), true))
-					continue
-				}
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
-
-			case "read_note":
-				var input struct {
-					Filename string `json:"filename"`
-					Offset   int    `json:"offset"`
-					Limit    int    `json:"limit"`
-				}
-				if err := json.Unmarshal(rawInput, &input); err != nil {
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("invalid input: %v", err), true))
-					continue
-				}
-
-				remaining := s.readBudget - s.linesRead
-				if remaining <= 0 {
-					fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Read budget exhausted (%d/%d lines)\033[0m\n", s.linesRead, s.readBudget)
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID,
-						"Read budget exhausted. You have enough context — answer the question now. Do not attempt more reads.", false))
-					continue
-				}
-
-				// Cap per-read to half the total budget so one file can't starve the rest
-				maxPerRead := s.readBudget / 2
-				if maxPerRead < 50 {
-					maxPerRead = 50
-				}
-				// Also cap to remaining budget (minus 1 for ReadNote header line)
-				cap := remaining - 1
-				if cap < 1 {
-					cap = 1
-				}
-				if maxPerRead > cap {
-					maxPerRead = cap
-				}
-				if input.Limit <= 0 || input.Limit > maxPerRead {
-					input.Limit = maxPerRead
-				}
-
-				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Reading %s", input.Filename)
-				if input.Offset > 0 || input.Limit > 0 {
-					fmt.Fprintf(os.Stderr, " [offset:%d limit:%d]", input.Offset, input.Limit)
-				}
-
-				content, err := notes.ReadNote(s.notesDir, input.Filename, input.Offset, input.Limit)
-				if err != nil {
-					fmt.Fprintln(os.Stderr)
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("read error: %v", err), true))
-					continue
-				}
-				contentLines := len(strings.Split(content, "\n"))
-				s.linesRead += contentLines
-				fmt.Fprintf(os.Stderr, " (%d lines, %d/%d budget)\033[0m\n", contentLines, s.linesRead, s.readBudget)
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, content, false))
-
-			case "list_tags":
-				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Listing tags...\033[0m\n")
-				result, err := notes.ListTags(s.notesDir)
-				if err != nil {
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
-					continue
-				}
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
-
-			case "list_recent_notes":
-				var input struct {
-					Count int `json:"count"`
-				}
-				json.Unmarshal(rawInput, &input)
-				if input.Count <= 0 {
-					input.Count = 20
-				}
-				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Listing %d recent notes...\033[0m\n", input.Count)
-				result, err := notes.ListRecentNotes(s.notesDir, input.Count)
-				if err != nil {
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
-					continue
-				}
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
-
-			case "note_index":
-				fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Building note index...\033[0m\n")
-				result, err := notes.NoteIndex(s.notesDir)
-				if err != nil {
-					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
-					continue
-				}
-				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result, false))
+			handler, ok := s.handlers[toolName]
+			if !ok {
+				toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("unknown tool: %s", toolName), true))
+				continue
 			}
+
+			result := handler(s.notesDir, rawInput, budget)
+
+			if result.NeedsConfirm {
+				if s.confirmFn == nil {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, "No confirmation handler — action skipped.", false))
+					continue
+				}
+				resp := s.confirmFn(result)
+				if resp.Approved {
+					output, err := result.Execute()
+					if err != nil {
+						toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, fmt.Sprintf("error: %v", err), true))
+					} else {
+						toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, output, false))
+					}
+				} else if resp.Feedback != "" {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID,
+						fmt.Sprintf("User wants changes: %s", resp.Feedback), false))
+				} else {
+					toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, "User declined this action.", false))
+				}
+				continue
+			}
+
+			toolResults = append(toolResults, anthropic.NewToolResultBlock(toolID, result.Content, result.IsError))
 		}
 
 		s.messages = append(s.messages, anthropic.NewUserMessage(toolResults...))
@@ -431,15 +377,42 @@ func loadMemories() string {
 	return strings.TrimSpace(string(data))
 }
 
-const memoryPrompt = `Extract one concise memory from this conversation that would help you answer future questions faster. Stick to what you observed — don't interpret or assume beyond what was directly in the notes.
+const memoryPrompt = `Extract a concise memory about the USER'S PREFERENCES from this conversation if you can — how they like things organized, formatted, tagged, or managed. Only save things that reveal how the user works or what they prefer.
 
-Return a single bullet point, or "none" if nothing new was learned. Do not repeat existing memories.`
+Do NOT save anything about the content of their notes (topics, people, projects, facts) unless user specifically asks you to remember something. Generally, just save workflow and preference patterns.`
 
 const consolidatePrompt = `Here are saved memories from previous sessions. Consolidate them: remove duplicates, keep the best version of each topic. Return only bullet points (- prefix), one per line. Do not add new information — just clean up what's here.`
 
+// userTurnCount returns the number of user messages in the conversation,
+// excluding tool_result messages (which are user-role but not real user turns).
+func (s *Session) userTurnCount() int {
+	count := 0
+	for _, msg := range s.messages {
+		if msg.Role != "user" {
+			continue
+		}
+		// Tool result messages have OfToolResult blocks; skip those.
+		isToolResult := false
+		for _, block := range msg.Content {
+			if block.OfToolResult != nil {
+				isToolResult = true
+				break
+			}
+		}
+		if !isToolResult {
+			count++
+		}
+	}
+	return count
+}
+
+const minUserTurnsForMemory = 3
+
 // SaveMemories extracts learnings from the session and appends to memories file.
-func (s *AskSession) SaveMemories() {
-	if len(s.messages) < 2 {
+// Only runs when the conversation had enough user turns (3+) to potentially
+// reveal preferences — a single Q&A rarely contains anything worth remembering.
+func (s *Session) SaveMemories() {
+	if s.userTurnCount() < minUserTurnsForMemory {
 		return
 	}
 

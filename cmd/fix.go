@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"n-notes/notes"
+	"n-notes/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -43,7 +43,7 @@ func runFixFrontmatter(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	broken, err := notes.FindBrokenFrontmatter(dir)
+	broken, err := utils.FindBrokenFrontmatter(dir)
 	if err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func runFixFrontmatter(cmd *cobra.Command, args []string) error {
 	fixed := 0
 	for _, name := range broken {
 		path := filepath.Join(dir, name)
-		changed, err := notes.FixFrontmatterFences(path)
+		changed, err := utils.FixFrontmatterFences(path)
 		if err != nil {
 			fmt.Printf("  error fixing %s: %v\n", name, err)
 			continue
