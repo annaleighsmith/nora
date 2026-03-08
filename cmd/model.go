@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"n-notes/config"
+	"github.com/annaleighsmith/nora/config"
 )
 
 func init() {

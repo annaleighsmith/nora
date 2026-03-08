@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"n-notes/config"
+	"github.com/annaleighsmith/nora/config"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )

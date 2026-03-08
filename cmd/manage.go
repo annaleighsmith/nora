@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"n-notes/ai"
-	"n-notes/utils"
+	"github.com/annaleighsmith/nora/ai"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/spf13/cobra"
 )

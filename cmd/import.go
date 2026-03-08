@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"strings"
 
-	"n-notes/ai"
-	"n-notes/config"
+	"github.com/annaleighsmith/nora/ai"
+	"github.com/annaleighsmith/nora/config"
 
 	"github.com/spf13/cobra"
 )

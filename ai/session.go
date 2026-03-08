@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"n-notes/config"
-	"n-notes/utils"
+	"github.com/annaleighsmith/nora/config"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/anthropics/anthropic-sdk-go"
 )

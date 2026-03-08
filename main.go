@@ -1,6 +1,6 @@
 package main
 
-import "n-notes/cmd"
+import "github.com/annaleighsmith/nora/cmd"
 
 func main() {
 	cmd.Execute()

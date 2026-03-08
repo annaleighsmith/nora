@@ -1,4 +1,4 @@
-module n-notes
+module github.com/annaleighsmith/nora
 
 go 1.25.0
 

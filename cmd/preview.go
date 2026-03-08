@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"n-notes/utils"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/spf13/cobra"
 )

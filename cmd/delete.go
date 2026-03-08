@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"n-notes/utils"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/spf13/cobra"
 )

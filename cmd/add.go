@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode"
 
-	"n-notes/ai"
-	"n-notes/config"
-	"n-notes/utils"
+	"github.com/annaleighsmith/nora/ai"
+	"github.com/annaleighsmith/nora/config"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/spf13/cobra"
 )
