@@ -45,7 +45,7 @@ func runManage(cmd *cobra.Command, args []string) error {
 			stopSpinnerFn()
 		}
 
-		fmt.Printf("\n%s\n", result.Proposal)
+		fmt.Printf("\n%s\n", utils.Render(result.Proposal))
 		utils.Dim.Println("Enter to confirm, or type feedback to revise:")
 		fmt.Fprint(os.Stderr, utils.PromptCaret)
 		reader := bufio.NewReader(os.Stdin)

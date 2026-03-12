@@ -298,6 +298,12 @@ func termStyle() ansi.StyleConfig {
 				Margin: uintPtr(0),
 			},
 		},
+		Item: ansi.StylePrimitive{
+			BlockPrefix: "• ",
+		},
+		Enumeration: ansi.StylePrimitive{
+			BlockPrefix: ". ",
+		},
 	}
 }
 
