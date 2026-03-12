@@ -45,18 +45,19 @@ func runManage(cmd *cobra.Command, args []string) error {
 			stopSpinnerFn()
 		}
 
-		fmt.Printf("\n%s\n\033[2mEnter to confirm, or type feedback to revise:\033[0m\n", result.Proposal)
-		fmt.Fprintf(os.Stderr, utils.PromptCaret)
+		fmt.Printf("\n%s\n", result.Proposal)
+		utils.Dim.Println("Enter to confirm, or type feedback to revise:")
+		fmt.Fprint(os.Stderr, utils.PromptCaret)
 		reader := bufio.NewReader(os.Stdin)
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(input)
 
-		if restartSpinnerFn != nil {
-			restartSpinnerFn()
-		}
-
 		if input == "" {
 			return ai.ConfirmResponse{Approved: true}
+		}
+
+		if restartSpinnerFn != nil {
+			restartSpinnerFn()
 		}
 		return ai.ConfirmResponse{Feedback: input}
 	}
@@ -88,17 +89,17 @@ func runManage(cmd *cobra.Command, args []string) error {
 	// One-shot mode: args become the first (and only) message
 	if len(args) > 0 {
 		question := strings.Join(args, " ")
-		fmt.Fprintf(os.Stderr, utils.UserEcho, question)
+		utils.UserEcholn(os.Stderr, question)
 		return send(question)
 	}
 
 	// REPL mode
-	fmt.Fprintf(os.Stderr, "\033[2mManage mode — read + write access to your vault. exit to quit.\033[0m\n\n")
+	utils.Dimf("Manage mode — read + write access to your vault. exit to quit.\n\n")
 
 	followUp := false
 	for {
 		if followUp {
-			fmt.Printf("\n" + utils.PromptHint + "\n")
+			fmt.Printf("\n%s\n", utils.PromptHint)
 		}
 
 		input, done := utils.PromptBare(reader)
@@ -110,11 +111,11 @@ func runManage(cmd *cobra.Command, args []string) error {
 		}
 
 		if followUp {
-			fmt.Fprintf(os.Stderr, "\033[A\033[2K\033[A\033[2K\033[A\033[2K\r")
+			utils.ClearLinesUp(os.Stderr, 3)
 		} else {
-			fmt.Fprintf(os.Stderr, "\033[A\033[2K\r")
+			utils.ClearLinesUp(os.Stderr, 1)
 		}
-		fmt.Fprintf(os.Stderr, utils.UserEcho, input)
+		utils.UserEcholn(os.Stderr, input)
 
 		if err := send(input); err != nil {
 			return err

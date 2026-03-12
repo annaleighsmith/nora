@@ -9,12 +9,16 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
+	"golang.org/x/term"
 )
 
 // Pick opens fzf to select a note with fuzzy matching across filenames and content.
 // Returns the selected file path, or empty string if cancelled.
 func Pick(dir, query string, inline bool) (string, error) {
-	self, _ := os.Executable()
+	self, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine executable path: %w", err)
+	}
 
 	// For #tag queries, use ripgrep to scope to matching files first
 	if query != "" && strings.HasPrefix(query, "#") {
@@ -107,7 +111,10 @@ func PickFrom(paths []string, inline bool) (string, error) {
 		return "", nil
 	}
 
-	self, _ := os.Executable()
+	self, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine executable path: %w", err)
+	}
 
 	fzfArgs := []string{
 		"--delimiter", "/",
@@ -139,7 +146,10 @@ func PickMultiFrom(paths []string, inline bool) ([]string, error) {
 		return nil, nil
 	}
 
-	self, _ := os.Executable()
+	self, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("could not determine executable path: %w", err)
+	}
 
 	fzfArgs := []string{
 		"--multi",
@@ -184,7 +194,7 @@ func Show(dir, query string) error {
 		return fmt.Errorf("could not read %s: %w", path, err)
 	}
 
-	fmt.Printf("\033[2m%s\033[0m\n", filepath.Base(path))
+	Dim.Println(filepath.Base(path))
 	fmt.Println(Render(string(content)))
 	return nil
 }
@@ -210,9 +220,14 @@ func Open(dir, query string) error {
 
 // Render formats markdown content for terminal display using glamour.
 func Render(content string) string {
+	width := 80
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		width = w
+	}
+
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(termStyle()),
-		glamour.WithWordWrap(0),
+		glamour.WithWordWrap(width),
 	)
 	if err != nil {
 		return content

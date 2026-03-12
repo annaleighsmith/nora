@@ -273,9 +273,9 @@ func handleSearchNotes(notesDir string, rawInput json.RawMessage, budget *ReadBu
 		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
 
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Searching for %q...\033[0m\n", input.Query)
+	utils.Dimf("[TOOL] Searching for %q...\n", input.Query)
 
-	result, err := utils.SearchNotes(notesDir, input.Query)
+	result, err := utils.SearchNotes(notesDir, input.Query, false)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("search error: %v", err), IsError: true}
 	}
@@ -291,10 +291,11 @@ func handleReadNote(notesDir string, rawInput json.RawMessage, budget *ReadBudge
 	if err := json.Unmarshal(rawInput, &input); err != nil {
 		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
+	input.Filename = safeName(input.Filename)
 
 	remaining := budget.Total - budget.Used
 	if remaining <= 0 {
-		fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Read budget exhausted (%d/%d lines)\033[0m\n", budget.Used, budget.Total)
+		utils.Dimf("[TOOL] Read budget exhausted (%d/%d lines)\n", budget.Used, budget.Total)
 		return ToolResult{Content: "Read budget exhausted. You have enough context — answer the question now. Do not attempt more reads."}
 	}
 
@@ -302,35 +303,35 @@ func handleReadNote(notesDir string, rawInput json.RawMessage, budget *ReadBudge
 	if maxPerRead < 50 {
 		maxPerRead = 50
 	}
-	cap := remaining - 1
-	if cap < 1 {
-		cap = 1
+	if maxPerRead > remaining {
+		maxPerRead = remaining
 	}
-	if maxPerRead > cap {
-		maxPerRead = cap
+	if maxPerRead < 1 {
+		maxPerRead = 1
 	}
 	if input.Limit <= 0 || input.Limit > maxPerRead {
 		input.Limit = maxPerRead
 	}
 
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Reading %s", input.Filename)
-	if input.Offset > 0 || input.Limit > 0 {
-		fmt.Fprintf(os.Stderr, " [offset:%d limit:%d]", input.Offset, input.Limit)
-	}
-
 	content, err := utils.ReadNote(notesDir, input.Filename, input.Offset, input.Limit)
 	if err != nil {
-		fmt.Fprintln(os.Stderr)
 		return ToolResult{Content: fmt.Sprintf("read error: %v", err), IsError: true}
 	}
 	contentLines := len(strings.Split(content, "\n"))
 	budget.Used += contentLines
-	fmt.Fprintf(os.Stderr, " (%d lines, %d/%d budget)\033[0m\n", contentLines, budget.Used, budget.Total)
+
+	if input.Offset > 0 || input.Limit > 0 {
+		utils.Dimf("[TOOL] Reading %s [offset:%d limit:%d] (%d lines, %d/%d budget)\n",
+			input.Filename, input.Offset, input.Limit, contentLines, budget.Used, budget.Total)
+	} else {
+		utils.Dimf("[TOOL] Reading %s (%d lines, %d/%d budget)\n",
+			input.Filename, contentLines, budget.Used, budget.Total)
+	}
 	return ToolResult{Content: content}
 }
 
 func handleListTags(notesDir string, rawInput json.RawMessage, budget *ReadBudget) ToolResult {
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Listing tags...\033[0m\n")
+	utils.Dimf("[TOOL] Listing tags...\n")
 	result, err := utils.ListTags(notesDir)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("error: %v", err), IsError: true}
@@ -342,11 +343,13 @@ func handleListRecentNotes(notesDir string, rawInput json.RawMessage, budget *Re
 	var input struct {
 		Count int `json:"count"`
 	}
-	json.Unmarshal(rawInput, &input)
+	if err := json.Unmarshal(rawInput, &input); err != nil {
+		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
+	}
 	if input.Count <= 0 {
 		input.Count = 20
 	}
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Listing %d recent notes...\033[0m\n", input.Count)
+	utils.Dimf("[TOOL] Listing %d recent notes...\n", input.Count)
 	result, err := utils.ListRecentNotes(notesDir, input.Count)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("error: %v", err), IsError: true}
@@ -355,7 +358,7 @@ func handleListRecentNotes(notesDir string, rawInput json.RawMessage, budget *Re
 }
 
 func handleNoteIndex(notesDir string, rawInput json.RawMessage, budget *ReadBudget) ToolResult {
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Building note index...\033[0m\n")
+	utils.Dimf("[TOOL] Building note index...\n")
 	result, err := utils.NoteIndex(notesDir)
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("error: %v", err), IsError: true}
@@ -372,6 +375,7 @@ func handleDeleteNotes(notesDir string, rawInput json.RawMessage, budget *ReadBu
 	if err := json.Unmarshal(rawInput, &input); err != nil {
 		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
+	input.Files = safeNames(input.Files)
 	if len(input.Files) == 0 {
 		return ToolResult{Content: "no files specified", IsError: true}
 	}
@@ -411,6 +415,7 @@ func handleArchiveNotes(notesDir string, rawInput json.RawMessage, budget *ReadB
 	if err := json.Unmarshal(rawInput, &input); err != nil {
 		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
+	input.Files = safeNames(input.Files)
 	if len(input.Files) == 0 {
 		return ToolResult{Content: "no files specified", IsError: true}
 	}
@@ -470,7 +475,7 @@ func handleCreateNote(notesDir string, rawInput json.RawMessage, budget *ReadBud
 	}
 
 	// Format via light model
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Formatting note...\033[0m\n")
+	utils.Dimf("[TOOL] Formatting note...\n")
 	formatted, err := Format(raw.String(), "")
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("formatting error: %v", err), IsError: true}
@@ -478,7 +483,7 @@ func handleCreateNote(notesDir string, rawInput json.RawMessage, budget *ReadBud
 	formatted = stripCreateFences(formatted)
 
 	// Generate filename from the formatted content
-	filename := generateCreateFilename(formatted)
+	filename := safeName(generateCreateFilename(formatted))
 	fullPath := filepath.Join(notesDir, filename)
 
 	var proposal strings.Builder
@@ -504,6 +509,7 @@ func handleAddTag(notesDir string, rawInput json.RawMessage, budget *ReadBudget)
 	if err := json.Unmarshal(rawInput, &input); err != nil {
 		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
+	input.Files = safeNames(input.Files)
 	if len(input.Files) == 0 || input.Tag == "" {
 		return ToolResult{Content: "files and tag are required", IsError: true}
 	}
@@ -536,6 +542,7 @@ func handleRemoveTag(notesDir string, rawInput json.RawMessage, budget *ReadBudg
 	if err := json.Unmarshal(rawInput, &input); err != nil {
 		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
+	input.Files = safeNames(input.Files)
 	if len(input.Files) == 0 || input.Tag == "" {
 		return ToolResult{Content: "files and tag are required", IsError: true}
 	}
@@ -567,6 +574,7 @@ func handleFixFrontmatter(notesDir string, rawInput json.RawMessage, budget *Rea
 	if err := json.Unmarshal(rawInput, &input); err != nil {
 		return ToolResult{Content: fmt.Sprintf("invalid input: %v", err), IsError: true}
 	}
+	input.Files = safeNames(input.Files)
 	if len(input.Files) == 0 {
 		return ToolResult{Content: "no files specified", IsError: true}
 	}
@@ -595,6 +603,22 @@ func handleFixFrontmatter(notesDir string, rawInput json.RawMessage, budget *Rea
 			return fmt.Sprintf("Fixed frontmatter on %d note(s).", fixed), nil
 		},
 	}
+}
+
+// safeName strips directory components from a filename to prevent path traversal.
+// AI tool calls could craft filenames like "../../../etc/passwd" — this ensures
+// we never leave the notes directory.
+func safeName(name string) string {
+	return filepath.Base(name)
+}
+
+// safeNames applies safeName to a slice of filenames.
+func safeNames(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = safeName(n)
+	}
+	return out
 }
 
 // --- Helpers for create_note ---
@@ -651,14 +675,15 @@ func extractCreateDate(content string) string {
 	return ""
 }
 
+var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+
 func slugifyCreate(s string, style string) string {
 	s = strings.ToLower(s)
-	reg := regexp.MustCompile(`[^a-z0-9]+`)
 	sep := "-"
 	if style == "snake" {
 		sep = "_"
 	}
-	s = reg.ReplaceAllString(s, sep)
+	s = slugRe.ReplaceAllString(s, sep)
 	s = strings.Trim(s, sep)
 	if len(s) > 50 {
 		s = s[:50]

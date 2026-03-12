@@ -43,7 +43,8 @@ func init() {
 func loadNotesDir() (string, error) {
 	cfg, err := config.Load()
 	if err != nil {
-		return "", fmt.Errorf("no config found — run `nora setup` or create %s", config.Path())
+		cfgPath, _ := config.Path() // best-effort path for error message
+		return "", fmt.Errorf("no config found — run `nora setup` or create %s", cfgPath)
 	}
 	return cfg.NotesDir, nil
 }
@@ -70,7 +71,7 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	query := strings.Join(args, " ")
-	result, err := utils.SearchNotes(dir, query)
+	result, err := utils.SearchNotes(dir, query, true)
 	if err != nil {
 		return err
 	}

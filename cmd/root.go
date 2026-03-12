@@ -3,9 +3,12 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/annaleighsmith/nora/ai"
 	"github.com/annaleighsmith/nora/config"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -27,42 +30,36 @@ var rootCmd = &cobra.Command{
 		if skipConfigCheck[cmd.Name()] {
 			return nil
 		}
-		if _, err := config.Load(); err != nil {
-			return fmt.Errorf("no config found -- run `nora setup`. You can edit your config at %s", config.Path())
+		cfg, err := config.Load()
+		if err != nil {
+			cfgPath, _ := config.Path() // best-effort path for error message
+			return fmt.Errorf("no config found -- run `nora setup`. You can edit your config at %s", cfgPath)
 		}
+		ai.InitDebugLog(cfg.Debug)
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		model, _ := cmd.Flags().GetBool("model")
-		if model {
-			return runModel(args)
-		}
-		search, _ := cmd.Flags().GetBool("search")
-		if search {
-			return runSearch(cmd, args)
-		}
-		show, _ := cmd.Flags().GetBool("show")
-		if show {
-			return runShow(cmd, args)
-		}
-		list, _ := cmd.Flags().GetBool("list")
-		if list {
-			return runList(cmd, args)
-		}
-		edit, _ := cmd.Flags().GetBool("edit")
-		if edit {
-			return runEdit(cmd, args)
-		}
-		add, _ := cmd.Flags().GetBool("add")
-		if add {
-			return runAdd(cmd, args)
-		}
-		new, _ := cmd.Flags().GetBool("new")
-		if new {
-			return runNew(cmd, args)
+		for _, sf := range shortcutFlags {
+			if v, _ := cmd.Flags().GetBool(sf.name); v {
+				return sf.handler(cmd, args)
+			}
 		}
 		return cmd.Help()
 	},
+}
+
+// shortcutFlags maps root-level shortcut flags to their handler functions.
+var shortcutFlags = []struct {
+	name    string
+	handler func(*cobra.Command, []string) error
+}{
+	{"model", func(_ *cobra.Command, args []string) error { return runModel(args) }},
+	{"search", runSearch},
+	{"show", runShow},
+	{"list", runList},
+	{"edit", runEdit},
+	{"add", runAdd},
+	{"new", runNew},
 }
 
 var isTTY = term.IsTerminal(int(os.Stdout.Fd()))
@@ -71,14 +68,14 @@ func b(s string) string {
 	if !isTTY {
 		return s
 	}
-	return "\033[1m" + s + "\033[0m"
+	return utils.Bold.Sprint(s)
 }
 
 func u(s string) string {
 	if !isTTY {
 		return s
 	}
-	return "\033[4m" + s + "\033[0m"
+	return utils.Underline.Sprint(s)
 }
 
 func init() {
@@ -141,10 +138,28 @@ A terminal-first AI-powered note-taking tool
 	})
 }
 
+func cleanup() {
+	fmt.Fprintln(os.Stderr)
+	utils.ClearLine(os.Stderr)
+	utils.Dim.Fprintln(os.Stderr, "Goodbye!")
+	ai.Usage.Print()
+	ai.DebugLog.Close()
+}
+
 func Execute() {
+	// Catch Ctrl+C for clean exit with usage + goodbye.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sig
+		cleanup()
+		os.Exit(0)
+	}()
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 	ai.Usage.Print()
+	ai.DebugLog.Close()
 }

@@ -10,7 +10,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/annaleighsmith/nora/ai"
 	"github.com/annaleighsmith/nora/config"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/spf13/cobra"
@@ -39,7 +41,8 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		printStatus("Config", false, err.Error())
 		return nil
 	}
-	printStatus("Config", true, config.Path())
+	cfgPath, _ := config.Path() // safe: Load() just succeeded
+	printStatus("Config", true, cfgPath)
 
 	// Notes dir
 	dir := expandHome(cfg.NotesDir)
@@ -96,8 +99,7 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		printStatus("API key", false, "ANTHROPIC_API_KEY not set")
 		ok = false
 	} else {
-		masked := key[:8] + "..." + key[len(key)-4:]
-		printStatus("API key", true, masked)
+		printStatus("API key", true, "set")
 	}
 
 	// API probe
@@ -119,13 +121,22 @@ func runHealth(cmd *cobra.Command, args []string) error {
 			printStatus("API probe", false, err.Error())
 			ok = false
 		} else {
-			printStatus("API probe", true, fmt.Sprintf("%s responded in %dms (%d input + %d output tokens)",
-				string(model), elapsed.Milliseconds(), resp.Usage.InputTokens, resp.Usage.OutputTokens))
+			ai.DebugLog.Log(ai.APILogEntry{
+				Caller:        "HealthProbe",
+				Model:         string(model),
+				LatencyMs:     elapsed.Milliseconds(),
+				InputTokens:   resp.Usage.InputTokens,
+				OutputTokens:  resp.Usage.OutputTokens,
+				CacheCreation: resp.Usage.CacheCreationInputTokens,
+				CacheRead:     resp.Usage.CacheReadInputTokens,
+			})
+			printStatus("API probe", true, fmt.Sprintf("Responded in %dms", elapsed.Milliseconds()))
 		}
 	}
 
 	// Memories
-	memPath := filepath.Join(config.Dir(), "memories.md")
+	cfgDir, _ := config.Dir() // safe: Load() succeeded above
+	memPath := filepath.Join(cfgDir, "memories.md")
 	if data, err := os.ReadFile(memPath); err == nil {
 		count := 0
 		for _, line := range strings.Split(string(data), "\n") {
@@ -150,16 +161,19 @@ func runHealth(cmd *cobra.Command, args []string) error {
 }
 
 func printStatus(label string, ok bool, detail string) {
-	icon := "\033[32m✓\033[0m"
+	icon := utils.Green.Sprint("✓")
 	if !ok {
-		icon = "\033[31m✗\033[0m"
+		icon = utils.Red.Sprint("✗")
 	}
 	fmt.Fprintf(tw, "  %s\t%s\t%s\n", icon, label, detail)
 }
 
 func expandHome(path string) string {
 	if strings.HasPrefix(path, "~/") {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path // return unexpanded if home dir unavailable
+		}
 		return filepath.Join(home, path[2:])
 	}
 	return path

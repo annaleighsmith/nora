@@ -37,7 +37,10 @@ var setupCmd = &cobra.Command{
 
 		// Expand ~ to home directory
 		if strings.HasPrefix(notesDir, "~/") {
-			home, _ := os.UserHomeDir()
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("could not determine home directory: %w", err)
+			}
 			notesDir = home + notesDir[1:]
 		}
 
@@ -61,8 +64,10 @@ var setupCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Config saved to %s\n", config.Path())
-		fmt.Printf("Prompts directory: %s\n", config.PromptsDir())
+		cfgPath, _ := config.Path()       // safe: Save() just succeeded
+		promptsDir, _ := config.PromptsDir() // safe: home dir resolved above
+		fmt.Printf("Config saved to %s\n", cfgPath)
+		fmt.Printf("Prompts directory: %s\n", promptsDir)
 		return nil
 	},
 }
@@ -77,7 +82,10 @@ var promptDefaults = map[string]string{
 }
 
 func runResetPrompts() error {
-	dir := config.PromptsDir()
+	dir, err := config.PromptsDir()
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("could not create prompts directory: %w", err)
 	}

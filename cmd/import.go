@@ -261,14 +261,22 @@ func runImport(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func importLedgerPath() string {
-	return filepath.Join(config.Dir(), "imported.txt")
+func importLedgerPath() (string, error) {
+	dir, err := config.Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "imported.txt"), nil
 }
 
 // loadImportLedger reads the set of previously imported absolute paths.
 func loadImportLedger() map[string]bool {
 	ledger := make(map[string]bool)
-	data, err := os.ReadFile(importLedgerPath())
+	path, err := importLedgerPath()
+	if err != nil {
+		return ledger
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ledger
 	}
@@ -285,7 +293,11 @@ func appendToImportLedger(paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-	f, err := os.OpenFile(importLedgerPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	path, err := importLedgerPath()
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}

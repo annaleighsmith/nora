@@ -206,10 +206,11 @@ func slugify(s string, style string) string {
 	}
 }
 
+var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+
 func slugifyWith(s string, sep string) string {
 	s = strings.ToLower(s)
-	reg := regexp.MustCompile(`[^a-z0-9]+`)
-	s = reg.ReplaceAllString(s, sep)
+	s = slugRe.ReplaceAllString(s, sep)
 	s = strings.Trim(s, sep)
 	if len(s) > 50 {
 		s = s[:50]

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -14,31 +15,26 @@ const maxSearchLines = 100
 // SearchNotes runs ripgrep against the notes directory and returns formatted results.
 // If query starts with "#", it searches tags only in YAML frontmatter.
 // Otherwise it does a general content search with context lines.
-func SearchNotes(dir, query string) (string, error) {
+func SearchNotes(dir, query string, color bool) (string, error) {
 	if query == "" {
 		return "no query provided", nil
 	}
 
-	var args []string
+	args := []string{"--no-messages"}
+	if color {
+		args = append(args, "--color=always")
+	}
 
 	if strings.HasPrefix(query, "#") {
 		tag := strings.TrimPrefix(query, "#")
-		args = []string{
-			"--no-messages",
-			"--files-with-matches",
-			fmt.Sprintf("tags:.*%s|^\\s*-\\s*%s", tag, tag),
-			dir,
+		pattern := fmt.Sprintf("tags:.*%s|^\\s*-\\s*%s", tag, tag)
+		if color {
+			args = append(args, "--heading", "--context=0", pattern, dir)
+		} else {
+			args = append(args, "--files-with-matches", pattern, dir)
 		}
 	} else {
-		args = []string{
-			"--no-messages",
-			"--context=2",
-			"--max-count=5",
-			"--heading",
-			"--ignore-case",
-			query,
-			dir,
-		}
+		args = append(args, "--context=2", "--max-count=5", "--heading", "--ignore-case", query, dir)
 	}
 
 	cmd := exec.Command("rg", args...)
@@ -71,7 +67,7 @@ func truncateResults(result string) string {
 		if len(lines) > maxSearchLines {
 			truncated := lines[:maxSearchLines]
 			// Count total lines in the actual file (first line is the filename in --heading mode)
-			totalLines := countFileLines(strings.TrimSpace(lines[0]))
+			totalLines := countFileLines(stripANSI(strings.TrimSpace(lines[0])))
 			truncated = append(truncated, fmt.Sprintf("... (truncated, file is %d lines total — use read_note to get more)", totalLines))
 			out = append(out, strings.Join(truncated, "\n"))
 		} else {
@@ -80,6 +76,12 @@ func truncateResults(result string) string {
 	}
 
 	return strings.Join(out, "\n\n")
+}
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
 }
 
 func countFileLines(path string) int {

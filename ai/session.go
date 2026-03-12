@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
 	"github.com/annaleighsmith/nora/config"
 	"github.com/annaleighsmith/nora/utils"
 
@@ -205,14 +207,16 @@ func (s *Session) Send(question string) ([]string, error) {
 	ctx := context.Background()
 
 	for range maxToolCalls {
+		callStart := time.Now()
 		stream := s.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
 			Model:     s.model,
 			MaxTokens: 4096,
 			System: []anthropic.TextBlockParam{
 				{Text: s.prompt},
 			},
-			Tools:    s.tools,
-			Messages: s.messages,
+			Tools:        s.tools,
+			Messages:     s.messages,
+			CacheControl: anthropic.NewCacheControlEphemeralParam(),
 		})
 
 		var assistantBlocks []anthropic.ContentBlockParamUnion
@@ -223,6 +227,7 @@ func (s *Session) Send(question string) ([]string, error) {
 		var currentBlockType string
 		var fullAnswer string
 		var stopReason anthropic.StopReason
+		var callInput, callOutput, callCacheCreation, callCacheRead int64
 
 		for stream.Next() {
 			event := stream.Current()
@@ -231,12 +236,18 @@ func (s *Session) Send(question string) ([]string, error) {
 			case "message_start":
 				msg := event.AsMessageStart()
 				u := msg.Message.Usage
+				callInput += u.InputTokens
+				callCacheCreation += u.CacheCreationInputTokens
+				callCacheRead += u.CacheReadInputTokens
 				Usage.Add(string(s.model), u.InputTokens, 0, u.CacheCreationInputTokens, u.CacheReadInputTokens)
 
 			case "message_delta":
 				delta := event.AsMessageDelta()
 				stopReason = delta.Delta.StopReason
 				u := delta.Usage
+				callOutput += u.OutputTokens
+				callCacheCreation += u.CacheCreationInputTokens
+				callCacheRead += u.CacheReadInputTokens
 				Usage.Add(string(s.model), 0, u.OutputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens)
 
 			case "content_block_start":
@@ -280,12 +291,26 @@ func (s *Session) Send(question string) ([]string, error) {
 			return nil, fmt.Errorf("stream error: %w", err)
 		}
 
+		DebugLog.Log(APILogEntry{
+			Caller:        "Send",
+			Model:         string(s.model),
+			Streaming:     true,
+			LatencyMs:     time.Since(callStart).Milliseconds(),
+			InputTokens:   callInput,
+			OutputTokens:  callOutput,
+			CacheCreation: callCacheCreation,
+			CacheRead:     callCacheRead,
+		})
+
 		if len(assistantBlocks) > 0 {
 			s.messages = append(s.messages, anthropic.NewAssistantMessage(assistantBlocks...))
 		}
 
 		if stopReason != anthropic.StopReasonToolUse {
-			fmt.Println(utils.Render(fullAnswer))
+			utils.SpinnerAwarePrint(func() {
+				fmt.Println()
+				fmt.Println(utils.Render(fullAnswer))
+			})
 			return extractCitedFiles(fullAnswer, s.notesDir), nil
 		}
 
@@ -365,12 +390,20 @@ func extractCitedFiles(answer, notesDir string) []string {
 	return files
 }
 
-func memoriesPath() string {
-	return filepath.Join(config.Dir(), "memories.md")
+func memoriesPath() (string, error) {
+	dir, err := config.Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "memories.md"), nil
 }
 
 func loadMemories() string {
-	data, err := os.ReadFile(memoriesPath())
+	path, err := memoriesPath()
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
@@ -416,7 +449,13 @@ func (s *Session) SaveMemories() {
 		return
 	}
 
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Saving memories...\033[0m\n")
+	memPath, err := memoriesPath()
+	if err != nil {
+		utils.Dimf("Could not resolve memories path: %v\n", err)
+		return
+	}
+
+	utils.Dimf("[TOOL] Saving memories...\n")
 
 	// Ask the light model to extract memories from the conversation
 	memMessages := make([]anthropic.MessageParam, len(s.messages))
@@ -424,17 +463,27 @@ func (s *Session) SaveMemories() {
 	memMessages = append(memMessages, anthropic.NewUserMessage(anthropic.NewTextBlock(memoryPrompt)))
 
 	ctx := context.Background()
+	memStart := time.Now()
 	resp, err := s.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     s.model,
 		MaxTokens: 512,
 		Messages:  memMessages,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "\033[2mCould not save memories: %v\033[0m\n", err)
+		utils.Dimf("Could not save memories: %v\n", err)
 		return
 	}
 
 	Usage.Add(string(s.model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
+	DebugLog.Log(APILogEntry{
+		Caller:        "SaveMemories",
+		Model:         string(s.model),
+		LatencyMs:     time.Since(memStart).Milliseconds(),
+		InputTokens:   resp.Usage.InputTokens,
+		OutputTokens:  resp.Usage.OutputTokens,
+		CacheCreation: resp.Usage.CacheCreationInputTokens,
+		CacheRead:     resp.Usage.CacheReadInputTokens,
+	})
 
 	var newMemories string
 	for _, block := range resp.Content {
@@ -445,7 +494,7 @@ func (s *Session) SaveMemories() {
 	}
 
 	if newMemories == "" || strings.ToLower(newMemories) == "none" {
-		fmt.Fprintf(os.Stderr, "\033[2m[TOOL] No new memories to save.\033[0m\n")
+		utils.Dimf("[TOOL] No new memories to save.\n")
 		return
 	}
 
@@ -461,6 +510,7 @@ func (s *Session) SaveMemories() {
 	consolidateMessages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(consolidatePrompt + "\n\n" + allMemories)),
 	}
+	consStart := time.Now()
 	consResp, err := s.client.Messages.New(ctx, anthropic.MessageNewParams{
 		Model:     s.lightModel,
 		MaxTokens: 1024,
@@ -468,12 +518,24 @@ func (s *Session) SaveMemories() {
 	})
 	if err != nil {
 		// If consolidation fails, just save the raw append
-		os.WriteFile(memoriesPath(), []byte(allMemories), 0644)
-		fmt.Fprintf(os.Stderr, "\033[2m[TOOL] Saved memory (consolidation failed).\033[0m\n")
+		if writeErr := os.WriteFile(memPath, []byte(allMemories), 0644); writeErr != nil {
+			utils.Dimf("[TOOL] Could not write memories: %v\n", writeErr)
+			return
+		}
+		utils.Dimf("[TOOL] Saved memory (consolidation failed).\n")
 		return
 	}
 
 	Usage.Add(string(s.lightModel), consResp.Usage.InputTokens, consResp.Usage.OutputTokens, consResp.Usage.CacheCreationInputTokens, consResp.Usage.CacheReadInputTokens)
+	DebugLog.Log(APILogEntry{
+		Caller:        "ConsolidateMemories",
+		Model:         string(s.lightModel),
+		LatencyMs:     time.Since(consStart).Milliseconds(),
+		InputTokens:   consResp.Usage.InputTokens,
+		OutputTokens:  consResp.Usage.OutputTokens,
+		CacheCreation: consResp.Usage.CacheCreationInputTokens,
+		CacheRead:     consResp.Usage.CacheReadInputTokens,
+	})
 
 	var consolidated string
 	for _, block := range consResp.Content {
@@ -487,7 +549,10 @@ func (s *Session) SaveMemories() {
 		consolidated = allMemories
 	}
 
-	os.WriteFile(memoriesPath(), []byte(consolidated+"\n"), 0644)
+	if writeErr := os.WriteFile(memPath, []byte(consolidated+"\n"), 0644); writeErr != nil {
+		utils.Dimf("[TOOL] Could not write memories: %v\n", writeErr)
+		return
+	}
 
 	// Count final memories
 	count := 0
@@ -496,5 +561,5 @@ func (s *Session) SaveMemories() {
 			count++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "\033[2m[TOOL] %d memory(s) total.\033[0m\n", count)
+	utils.Dimf("[TOOL] %d memory(s) total.\n", count)
 }

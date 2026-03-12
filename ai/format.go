@@ -74,6 +74,7 @@ func Format(rawInput string, originalFilename string) (string, error) {
 
 	model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
 
+	callStart := time.Now()
 	resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
 		Model:     model,
 		MaxTokens: 2048,
@@ -89,6 +90,15 @@ func Format(rawInput string, originalFilename string) (string, error) {
 	}
 
 	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
+	DebugLog.Log(APILogEntry{
+		Caller:        "Format",
+		Model:         string(model),
+		LatencyMs:     time.Since(callStart).Milliseconds(),
+		InputTokens:   resp.Usage.InputTokens,
+		OutputTokens:  resp.Usage.OutputTokens,
+		CacheCreation: resp.Usage.CacheCreationInputTokens,
+		CacheRead:     resp.Usage.CacheReadInputTokens,
+	})
 
 	for _, block := range resp.Content {
 		if block.Type == "text" {
@@ -143,6 +153,7 @@ func GenerateFrontmatter(fullContent string, originalFilename string) (string, e
 	// Build a truncated preview to send instead of the full content
 	preview := buildPreview(fullContent, originalFilename)
 
+	callStart := time.Now()
 	resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
 		Model:     model,
 		MaxTokens: 512,
@@ -158,6 +169,15 @@ func GenerateFrontmatter(fullContent string, originalFilename string) (string, e
 	}
 
 	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
+	DebugLog.Log(APILogEntry{
+		Caller:        "GenerateFrontmatter",
+		Model:         string(model),
+		LatencyMs:     time.Since(callStart).Milliseconds(),
+		InputTokens:   resp.Usage.InputTokens,
+		OutputTokens:  resp.Usage.OutputTokens,
+		CacheCreation: resp.Usage.CacheCreationInputTokens,
+		CacheRead:     resp.Usage.CacheReadInputTokens,
+	})
 
 	for _, block := range resp.Content {
 		if block.Type == "text" {
@@ -183,6 +203,7 @@ func QuickQuery(prompt string) (string, error) {
 	client := anthropic.NewClient()
 	model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
 
+	callStart := time.Now()
 	resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
 		Model:     model,
 		MaxTokens: 1024,
@@ -195,6 +216,15 @@ func QuickQuery(prompt string) (string, error) {
 	}
 
 	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
+	DebugLog.Log(APILogEntry{
+		Caller:        "QuickQuery",
+		Model:         string(model),
+		LatencyMs:     time.Since(callStart).Milliseconds(),
+		InputTokens:   resp.Usage.InputTokens,
+		OutputTokens:  resp.Usage.OutputTokens,
+		CacheCreation: resp.Usage.CacheCreationInputTokens,
+		CacheRead:     resp.Usage.CacheReadInputTokens,
+	})
 
 	for _, block := range resp.Content {
 		if block.Type == "text" {

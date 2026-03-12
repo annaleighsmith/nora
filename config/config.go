@@ -29,6 +29,7 @@ type BotConfig struct {
 
 type Config struct {
 	NotesDir string       `toml:"notes_dir"`
+	Debug    bool         `toml:"debug"`
 	Format   FormatConfig `toml:"format"`
 	Models   ModelConfig  `toml:"models"`
 	Bot      BotConfig    `toml:"bot"`
@@ -69,27 +70,55 @@ func ResolveModel(name string) string {
 	return name
 }
 
-func Dir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "nora")
+func Dir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("could not determine home directory: %w", err)
+	}
+	return filepath.Join(home, ".config", "nora"), nil
 }
 
-func Path() string {
-	return filepath.Join(Dir(), "config.toml")
+func Path() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "config.toml"), nil
 }
 
-func PromptsDir() string {
-	return filepath.Join(Dir(), "prompts")
+func PromptsDir() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "prompts"), nil
+}
+
+func LogsDir() (string, error) {
+	dir, err := Dir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "logs"), nil
 }
 
 func Load() (Config, error) {
 	var cfg Config
-	_, err := toml.DecodeFile(Path(), &cfg)
+	path, err := Path()
 	if err != nil {
-		return cfg, fmt.Errorf("could not load config at %s: %w", Path(), err)
+		return cfg, err
+	}
+	meta, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
+		return cfg, fmt.Errorf("could not load config at %s: %w", path, err)
+	}
+	if unknown := meta.Undecoded(); len(unknown) > 0 {
+		for _, key := range unknown {
+			fmt.Fprintf(os.Stderr, "warning: unknown config field %q (ignored)\n", key.String())
+		}
 	}
 	if cfg.NotesDir == "" {
-		return cfg, fmt.Errorf("notes_dir not set in %s", Path())
+		return cfg, fmt.Errorf("notes_dir not set in %s", path)
 	}
 
 	// Merge with defaults for missing format fields
@@ -123,7 +152,10 @@ func Load() (Config, error) {
 }
 
 func Save(cfg Config) error {
-	path := Path()
+	path, err := Path()
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("could not create config directory: %w", err)
 	}
@@ -138,7 +170,11 @@ func Save(cfg Config) error {
 // LoadPrompt reads a prompt file from ~/.config/nora/prompts/<name>.md.
 // If the file doesn't exist, it writes the default and returns it.
 func LoadPrompt(name, defaultContent string) (string, error) {
-	path := filepath.Join(PromptsDir(), name+".md")
+	promptsDir, err := PromptsDir()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(promptsDir, name+".md")
 
 	data, err := os.ReadFile(path)
 	if err == nil {
@@ -150,7 +186,7 @@ func LoadPrompt(name, defaultContent string) (string, error) {
 	}
 
 	// Write default
-	if err := os.MkdirAll(PromptsDir(), 0755); err != nil {
+	if err := os.MkdirAll(promptsDir, 0755); err != nil {
 		return "", fmt.Errorf("could not create prompts directory: %w", err)
 	}
 	if err := os.WriteFile(path, []byte(defaultContent), 0644); err != nil {

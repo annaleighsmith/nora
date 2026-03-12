@@ -16,7 +16,7 @@ import (
 
 var askCmd = &cobra.Command{
 	Use:   "ask [question...]",
-	Short: "Ask a question about your notes (AI-powered)",
+	Short: "Ask a question about your notes.",
 	Long: `Ask a question about your notes. AI searches and reads your vault to answer.
 
   nora ask what are my project ideas
@@ -63,27 +63,33 @@ func runAsk(cmd *cobra.Command, args []string) error {
 
 		filename := filepath.Base(filePath)
 		session.PreloadFile(filename, string(content))
-		fmt.Fprintf(os.Stderr, "\033[2mLoaded %s\033[0m\n\n", filename)
+		utils.Dimf("Loaded %s\n\n", filename)
 
 		// If no question from args, prompt for one
 		if question == "" {
 			reader := bufio.NewReader(os.Stdin)
-			fmt.Fprintf(os.Stderr, "\033[2mAsk about %s:\033[0m\n", filename)
+			utils.Dimf("Ask about %s:\n", filename)
 			input, done := utils.PromptBare(reader)
 			if done || input == "" {
 				return nil
 			}
 			question = input
-			fmt.Fprintf(os.Stderr, "\033[A\033[2K\033[A\033[2K\r")
+			utils.ClearLinesUp(os.Stderr, 2)
 		}
 
 		return chatLoop(session, question)
 	}
 
-	// Normal mode: question from args
+	// Normal mode: question from args or prompt
 	question := strings.Join(args, " ")
 	if question == "" {
-		return cmd.Help()
+		reader := bufio.NewReader(os.Stdin)
+		input, done := utils.PromptBare(reader)
+		if done || input == "" {
+			return nil
+		}
+		question = input
+		utils.ClearLinesUp(os.Stderr, 1)
 	}
 
 	return chatLoop(session, question)
@@ -122,9 +128,9 @@ func chatLoop(session *ai.Session, question string) error {
 		}
 
 		if followUp {
-			fmt.Fprintf(os.Stderr, "\033[A\033[2K\033[A\033[2K\r")
+			utils.ClearLinesUp(os.Stderr, 2)
 		}
-		fmt.Fprintf(os.Stderr, utils.UserEcho, question)
+		utils.UserEcholn(os.Stderr, question)
 
 		stop := utils.StartSpinner("Thinking...")
 		files, err := session.Send(question)
@@ -174,14 +180,16 @@ func browseFiles(files []string, mode string) {
 			editorCmd.Stdin = os.Stdin
 			editorCmd.Stdout = os.Stdout
 			editorCmd.Stderr = os.Stderr
-			editorCmd.Run()
+			if err := editorCmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "editor error: %v\n", err)
+			}
 		} else {
 			content, err := os.ReadFile(selected)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "could not read %s: %v\n", selected, err)
 				continue
 			}
-			fmt.Printf("\033[2m%s\033[0m\n", filepath.Base(selected))
+			utils.Dim.Println(filepath.Base(selected))
 			fmt.Println(utils.Render(string(content)))
 		}
 	}
