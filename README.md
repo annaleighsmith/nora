@@ -15,7 +15,6 @@ You'll need these on your `PATH`:
 - [Go](https://go.dev/) (to build)
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) — search
 - [fzf](https://github.com/junegunn/fzf) — fuzzy selection
-- [git](https://git-scm.com/) — version history
 - `$EDITOR` (defaults to neovim) — note editing
 
 ### Install
@@ -48,7 +47,7 @@ Run `nora --help` to see all commands and options.
 
 ### Phone access
 
-If you run [Tailscale](https://tailscale.com/), you can SSH into your machine from [Terminus](https://termius.com/) (or any mobile SSH client) and use Nora directly from your phone. No web UI needed.
+Right now I use [Tailscale](https://tailscale.com/) + [Terminus](https://termius.com/) to SSH into my machine and run Nora from my phone. Works great for quick lookups and `ask` sessions. A proper web UI (`nora serve`) is in progress for a more mobile-friendly experience.
 
 ## Heads up
 
@@ -61,10 +60,6 @@ If you run [Tailscale](https://tailscale.com/), you can SSH into your machine fr
 - Multi-provider support (OpenAI, Ollama, local models)
 - Web UI (`nora serve`) with HTMX + Pico CSS + CodeMirror
 - `[[wiki-links]]` support
-- Git auto-commit with AI-generated commit messages
-- Batch operations (bulk tag, bulk fix)
-- Better onboarding (auto-detect missing deps, interactive API key setup)
-- Stow-style symlink management for dotfiles and config notes
 
 ## License
 
