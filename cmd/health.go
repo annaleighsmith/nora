@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -60,7 +61,8 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		printStatus("Notes dir", true, fmt.Sprintf("%s (%d notes)", dir, mdCount))
 	}
 
-	// Models
+	// Provider + models
+	printStatus("Provider", true, cfg.Models.Provider)
 	printStatus("Light model", true, config.ResolveModel(cfg.Models.Light))
 	printStatus("Heavy model", true, config.ResolveModel(cfg.Models.Heavy))
 
@@ -93,44 +95,73 @@ func runHealth(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// API key
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		printStatus("API key", false, "ANTHROPIC_API_KEY not set")
-		ok = false
-	} else {
-		printStatus("API key", true, "set")
-	}
-
-	// API probe
-	if key != "" {
-		model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
-		client := anthropic.NewClient()
-
-		start := time.Now()
-		resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
-			Model:     model,
-			MaxTokens: 4,
-			Messages: []anthropic.MessageParam{
-				anthropic.NewUserMessage(anthropic.NewTextBlock("hi")),
-			},
-		})
-		elapsed := time.Since(start)
-
-		if err != nil {
-			printStatus("API probe", false, err.Error())
+	// API key + probe (anthropic provider only)
+	if cfg.Models.Provider != "claude-code" {
+		key := os.Getenv("ANTHROPIC_API_KEY")
+		if key == "" {
+			printStatus("API key", false, "ANTHROPIC_API_KEY not set")
 			ok = false
 		} else {
-			ai.DebugLog.Log(ai.APILogEntry{
-				Caller:        "HealthProbe",
-				Model:         string(model),
-				LatencyMs:     elapsed.Milliseconds(),
-				InputTokens:   resp.Usage.InputTokens,
-				OutputTokens:  resp.Usage.OutputTokens,
-				CacheCreation: resp.Usage.CacheCreationInputTokens,
-				CacheRead:     resp.Usage.CacheReadInputTokens,
+			printStatus("API key", true, "set")
+		}
+
+		if key != "" {
+			model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
+			client := anthropic.NewClient()
+
+			start := time.Now()
+			resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
+				Model:     model,
+				MaxTokens: 4,
+				Messages: []anthropic.MessageParam{
+					anthropic.NewUserMessage(anthropic.NewTextBlock("hi")),
+				},
 			})
-			printStatus("API probe", true, fmt.Sprintf("Responded in %dms", elapsed.Milliseconds()))
+			elapsed := time.Since(start)
+
+			if err != nil {
+				printStatus("API probe", false, err.Error())
+				ok = false
+			} else {
+				ai.DebugLog.Log(ai.APILogEntry{
+					Caller:        "HealthProbe",
+					Model:         string(model),
+					LatencyMs:     elapsed.Milliseconds(),
+					InputTokens:   resp.Usage.InputTokens,
+					OutputTokens:  resp.Usage.OutputTokens,
+					CacheCreation: resp.Usage.CacheCreationInputTokens,
+					CacheRead:     resp.Usage.CacheReadInputTokens,
+				})
+				printStatus("API probe", true, fmt.Sprintf("Responded in %dms", elapsed.Milliseconds()))
+			}
+		}
+	} else {
+		// Claude Code provider — check CLI + auth + probe
+		if _, err := exec.LookPath("claude"); err != nil {
+			printStatus("claude CLI", false, "not found in PATH")
+			ok = false
+		} else {
+			printStatus("claude CLI", true, "found")
+
+			// Check auth — make sure subscription auth is active (not just API key)
+			authCmd := exec.Command("claude", "auth", "status")
+			authCmd.Env = stripAnthropicKey(os.Environ())
+			if authOut, err := authCmd.Output(); err != nil {
+				printStatus("claude auth", false, "not logged in — run `claude auth login`")
+				ok = false
+			} else {
+				var authStatus struct {
+					LoggedIn     bool   `json:"loggedIn"`
+					AuthMethod   string `json:"authMethod"`
+				}
+				if json.Unmarshal(authOut, &authStatus) == nil && authStatus.LoggedIn {
+					printStatus("claude auth", true, fmt.Sprintf("logged in via %s", authStatus.AuthMethod))
+				} else {
+					printStatus("claude auth", false, "not logged in — run `claude auth login`")
+					ok = false
+				}
+			}
+
 		}
 	}
 
@@ -166,6 +197,18 @@ func printStatus(label string, ok bool, detail string) {
 		icon = utils.Red.Sprint("✗")
 	}
 	fmt.Fprintf(tw, "  %s\t%s\t%s\n", icon, label, detail)
+}
+
+// stripAnthropicKey returns env without ANTHROPIC_API_KEY so claude CLI
+// uses subscription auth instead of the API key.
+func stripAnthropicKey(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, "ANTHROPIC_API_KEY=") {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }
 
 func expandHome(path string) string {

@@ -3,13 +3,10 @@ package ai
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/annaleighsmith/nora/config"
-
-	"github.com/anthropics/anthropic-sdk-go"
 )
 
 const DefaultFormatPrompt = `You are a note formatting assistant. Take the user's raw input and return a clean, well-structured markdown note.
@@ -45,14 +42,40 @@ func BuildConventions(fc config.FormatConfig) string {
 	return strings.Join(lines, "\n")
 }
 
-// Format sends raw input through Claude for formatting. If originalFilename
-// is non-empty, the AI will prefer it as the basis for the note title.
-func Format(rawInput string, originalFilename string) (string, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+// complete runs a one-shot completion through the configured provider,
+// tracking usage and debug logs if the provider returns token data.
+func complete(ctx context.Context, caller string, cfg config.Config, req CompletionRequest) (string, error) {
+	provider, err := GetProvider(cfg.Models.Provider)
+	if err != nil {
+		return "", err
 	}
 
+	callStart := time.Now()
+	resp, err := provider.Complete(ctx, req)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.InputTokens > 0 || resp.OutputTokens > 0 {
+		Usage.Add(resp.Model, resp.InputTokens, resp.OutputTokens, resp.CacheCreation, resp.CacheRead)
+		DebugLog.Log(APILogEntry{
+			Caller:        caller,
+			Model:         resp.Model,
+			LatencyMs:     time.Since(callStart).Milliseconds(),
+			InputTokens:   resp.InputTokens,
+			OutputTokens:  resp.OutputTokens,
+			CacheCreation: resp.CacheCreation,
+			CacheRead:     resp.CacheRead,
+		})
+	}
+
+	return resp.Text, nil
+}
+
+// Format sends raw input through the configured AI provider for formatting.
+// If originalFilename is non-empty, the AI will prefer it as the basis for
+// the note title.
+func Format(rawInput string, originalFilename string) (string, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return "", fmt.Errorf("could not load config: %w", err)
@@ -63,50 +86,17 @@ func Format(rawInput string, originalFilename string) (string, error) {
 		return "", err
 	}
 
-	client := anthropic.NewClient()
-
 	conventions := BuildConventions(cfg.Format)
 	today := time.Now().Format(cfg.Format.DateFormat)
-
-	// Strip .md extension from filename hint for cleaner prompt context
 	filenameHint := strings.TrimSuffix(originalFilename, ".md")
 	prompt := fmt.Sprintf(promptTemplate, conventions, today, filenameHint)
 
-	model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
-
-	callStart := time.Now()
-	resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
-		Model:     model,
-		MaxTokens: 2048,
-		System: []anthropic.TextBlockParam{
-			{Text: prompt},
-		},
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(rawInput)),
-		},
+	return complete(context.Background(), "Format", cfg, CompletionRequest{
+		SystemPrompt: prompt,
+		UserMessage:  rawInput,
+		MaxTokens:    2048,
+		Model:        cfg.Models.Light,
 	})
-	if err != nil {
-		return "", fmt.Errorf("claude API error: %w", err)
-	}
-
-	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
-	DebugLog.Log(APILogEntry{
-		Caller:        "Format",
-		Model:         string(model),
-		LatencyMs:     time.Since(callStart).Milliseconds(),
-		InputTokens:   resp.Usage.InputTokens,
-		OutputTokens:  resp.Usage.OutputTokens,
-		CacheCreation: resp.Usage.CacheCreationInputTokens,
-		CacheRead:     resp.Usage.CacheReadInputTokens,
-	})
-
-	for _, block := range resp.Content {
-		if block.Type == "text" {
-			return block.Text, nil
-		}
-	}
-
-	return "", fmt.Errorf("no text in API response")
 }
 
 const DefaultFrontmatterPrompt = `You are a note metadata assistant. Given a filename and a preview of a markdown note, generate ONLY the YAML frontmatter block for it.
@@ -123,14 +113,9 @@ Rules:
 const frontmatterPreviewLines = 20
 
 // GenerateFrontmatter sends a snippet of the note (filename + first N lines)
-// to Claude and gets back just the YAML frontmatter block. The original note
-// content is preserved untouched.
+// to the configured AI provider and gets back just the YAML frontmatter block.
+// The original note content is preserved untouched.
 func GenerateFrontmatter(fullContent string, originalFilename string) (string, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		return "", fmt.Errorf("could not load config: %w", err)
@@ -141,97 +126,33 @@ func GenerateFrontmatter(fullContent string, originalFilename string) (string, e
 		return "", err
 	}
 
-	client := anthropic.NewClient()
-
 	conventions := BuildConventions(cfg.Format)
 	today := time.Now().Format(cfg.Format.DateFormat)
 	filenameHint := strings.TrimSuffix(originalFilename, ".md")
 	prompt := fmt.Sprintf(promptTemplate, conventions, today, filenameHint)
 
-	model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
-
-	// Build a truncated preview to send instead of the full content
 	preview := buildPreview(fullContent, originalFilename)
 
-	callStart := time.Now()
-	resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
-		Model:     model,
-		MaxTokens: 512,
-		System: []anthropic.TextBlockParam{
-			{Text: prompt},
-		},
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(preview)),
-		},
+	return complete(context.Background(), "GenerateFrontmatter", cfg, CompletionRequest{
+		SystemPrompt: prompt,
+		UserMessage:  preview,
+		MaxTokens:    512,
+		Model:        cfg.Models.Light,
 	})
-	if err != nil {
-		return "", fmt.Errorf("claude API error: %w", err)
-	}
-
-	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
-	DebugLog.Log(APILogEntry{
-		Caller:        "GenerateFrontmatter",
-		Model:         string(model),
-		LatencyMs:     time.Since(callStart).Milliseconds(),
-		InputTokens:   resp.Usage.InputTokens,
-		OutputTokens:  resp.Usage.OutputTokens,
-		CacheCreation: resp.Usage.CacheCreationInputTokens,
-		CacheRead:     resp.Usage.CacheReadInputTokens,
-	})
-
-	for _, block := range resp.Content {
-		if block.Type == "text" {
-			return block.Text, nil
-		}
-	}
-
-	return "", fmt.Errorf("no text in API response")
 }
 
 // QuickQuery sends a one-shot prompt to the light model and returns the text response.
 func QuickQuery(prompt string) (string, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
-	}
-
 	cfg, err := config.Load()
 	if err != nil {
 		return "", fmt.Errorf("could not load config: %w", err)
 	}
 
-	client := anthropic.NewClient()
-	model := anthropic.Model(config.ResolveModel(cfg.Models.Light))
-
-	callStart := time.Now()
-	resp, err := client.Messages.New(context.Background(), anthropic.MessageNewParams{
-		Model:     model,
-		MaxTokens: 1024,
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(prompt)),
-		},
+	return complete(context.Background(), "QuickQuery", cfg, CompletionRequest{
+		UserMessage: prompt,
+		MaxTokens:   1024,
+		Model:       cfg.Models.Light,
 	})
-	if err != nil {
-		return "", fmt.Errorf("claude API error: %w", err)
-	}
-
-	Usage.Add(string(model), resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.Usage.CacheCreationInputTokens, resp.Usage.CacheReadInputTokens)
-	DebugLog.Log(APILogEntry{
-		Caller:        "QuickQuery",
-		Model:         string(model),
-		LatencyMs:     time.Since(callStart).Milliseconds(),
-		InputTokens:   resp.Usage.InputTokens,
-		OutputTokens:  resp.Usage.OutputTokens,
-		CacheCreation: resp.Usage.CacheCreationInputTokens,
-		CacheRead:     resp.Usage.CacheReadInputTokens,
-	})
-
-	for _, block := range resp.Content {
-		if block.Type == "text" {
-			return block.Text, nil
-		}
-	}
-	return "", fmt.Errorf("no text in API response")
 }
 
 func buildPreview(content string, filename string) string {

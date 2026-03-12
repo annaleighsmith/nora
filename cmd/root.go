@@ -53,7 +53,6 @@ var shortcutFlags = []struct {
 	name    string
 	handler func(*cobra.Command, []string) error
 }{
-	{"model", func(_ *cobra.Command, args []string) error { return runModel(args) }},
 	{"search", runSearch},
 	{"show", runShow},
 	{"list", runList},

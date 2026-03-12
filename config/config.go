@@ -17,8 +17,9 @@ type FormatConfig struct {
 }
 
 type ModelConfig struct {
-	Light string `toml:"light"` // low-reasoning tasks: format, frontmatter (default: haiku)
-	Heavy string `toml:"heavy"` // high-reasoning tasks: ask, query (default: sonnet)
+	Provider string `toml:"provider"` // "anthropic" (default) or "claude-code"
+	Light    string `toml:"light"`    // low-reasoning tasks: format, frontmatter (default: haiku)
+	Heavy    string `toml:"heavy"`    // high-reasoning tasks: ask, query (default: sonnet)
 }
 
 type BotConfig struct {
@@ -53,8 +54,9 @@ func DefaultConfig() Config {
 			SlugStyle:   "kebab",
 		},
 		Models: ModelConfig{
-			Light: "haiku",
-			Heavy: "sonnet",
+			Provider: "anthropic",
+			Light:    "haiku",
+			Heavy:    "sonnet",
 		},
 		Bot: BotConfig{
 			AskReadBudget: 500,
@@ -137,6 +139,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Format.SlugStyle == "" {
 		cfg.Format.SlugStyle = defaults.Format.SlugStyle
+	}
+	if cfg.Models.Provider == "" {
+		cfg.Models.Provider = defaults.Models.Provider
 	}
 	if cfg.Models.Light == "" {
 		cfg.Models.Light = defaults.Models.Light
