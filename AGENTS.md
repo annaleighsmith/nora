@@ -1,15 +1,16 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+This project uses **br** (beads_rust) for issue tracking. Run `br onboard` to get started.
 
 ## Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd sync               # Sync with git
+br ready              # Find available work
+br show <id>          # View issue details
+br update <id> --claim  # Claim work atomically
+br close <id>         # Complete work
+br sync --flush-only  # Export issues to .beads/
+git add .beads/ && git commit -m "beads sync"  # Commit synced state
 ```
 
 ## Non-Interactive Shell Commands
@@ -37,11 +38,13 @@ cp -rf source dest          # NOT: cp -r source dest
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
 <!-- BEGIN BEADS INTEGRATION -->
-## Issue Tracking with bd (beads)
+## Issue Tracking with br (beads_rust)
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+**IMPORTANT**: This project uses **br (beads_rust)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
 
-### Why bd?
+**Note**: `br` never executes git commands. After running `br sync --flush-only`, you must manually `git add` and `git commit` the changes in `.beads/`.
+
+### Why br?
 
 - Dependency-aware: Track blockers and relationships between issues
 - Version-controlled: Built on Dolt with cell-level merge
@@ -53,27 +56,27 @@ cp -rf source dest          # NOT: cp -r source dest
 **Check for ready work:**
 
 ```bash
-bd ready --json
+br ready --json
 ```
 
 **Create new issues:**
 
 ```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
+br create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
+br create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:br-123 --json
 ```
 
 **Claim and update:**
 
 ```bash
-bd update <id> --claim --json
-bd update bd-42 --priority 1 --json
+br update <id> --claim --json
+br update br-42 --priority 1 --json
 ```
 
 **Complete work:**
 
 ```bash
-bd close bd-42 --reason "Completed" --json
+br close br-42 --reason "Completed" --json
 ```
 
 ### Issue Types
@@ -94,27 +97,19 @@ bd close bd-42 --reason "Completed" --json
 
 ### Workflow for AI Agents
 
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task atomically**: `bd update <id> --claim`
+1. **Check ready work**: `br ready` shows unblocked issues
+2. **Claim your task atomically**: `br update <id> --claim`
 3. **Work on it**: Implement, test, document
 4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
-
-### Auto-Sync
-
-bd automatically syncs with git:
-
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
+   - `br create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
+5. **Complete**: `br close <id> --reason "Done"`
 
 ### Important Rules
 
-- ✅ Use bd for ALL task tracking
+- ✅ Use br for ALL task tracking
 - ✅ Always use `--json` flag for programmatic use
 - ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
+- ✅ Check `br ready` before asking "what should I work on?"
 - ❌ Do NOT create markdown TODO lists
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
@@ -133,7 +128,9 @@ For more details, see README.md and docs/QUICKSTART.md.
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
+   br sync --flush-only
+   git add .beads/
+   git commit -m "beads sync"
    git push
    git status  # MUST show "up to date with origin"
    ```
