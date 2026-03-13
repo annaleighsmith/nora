@@ -75,6 +75,10 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(result)
+	if utils.IsTTY() {
+		fmt.Print(utils.FrameSearchResults(result, dir, query))
+	} else {
+		fmt.Print(result)
+	}
 	return nil
 }

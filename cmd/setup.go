@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,7 +8,9 @@ import (
 
 	"github.com/annaleighsmith/nora/ai"
 	"github.com/annaleighsmith/nora/config"
+	"github.com/annaleighsmith/nora/utils"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
 
@@ -22,15 +23,21 @@ var setupCmd = &cobra.Command{
 			return runResetPrompts()
 		}
 
-		reader := bufio.NewReader(os.Stdin)
+		if !utils.IsInteractive() {
+			return fmt.Errorf("nora setup requires an interactive terminal")
+		}
 
 		defaultDir := config.DefaultConfig().NotesDir
-		fmt.Printf("Where do you want to store your notes? [%s] ", defaultDir)
-		input, err := reader.ReadString('\n')
+		var notesDir string
+		err := huh.NewInput().
+			Title("Where do you want to store your notes?").
+			Placeholder(defaultDir).
+			Value(&notesDir).
+			Run()
 		if err != nil {
 			return err
 		}
-		notesDir := strings.TrimSpace(input)
+		notesDir = strings.TrimSpace(notesDir)
 		if notesDir == "" {
 			notesDir = defaultDir
 		}
@@ -46,9 +53,11 @@ var setupCmd = &cobra.Command{
 
 		// Check if directory exists
 		if _, err := os.Stat(notesDir); os.IsNotExist(err) {
-			fmt.Printf("Directory %s does not exist. Create it? [y/N] ", notesDir)
-			confirm, _ := reader.ReadString('\n')
-			if strings.TrimSpace(strings.ToLower(confirm)) != "y" {
+			ok, cErr := utils.Confirm(fmt.Sprintf("Directory %s does not exist. Create it?", notesDir))
+			if cErr != nil {
+				return cErr
+			}
+			if !ok {
 				fmt.Println("Setup cancelled.")
 				return nil
 			}

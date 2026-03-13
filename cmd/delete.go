@@ -1,11 +1,9 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/annaleighsmith/nora/utils"
 
@@ -31,6 +29,10 @@ func init() {
 }
 
 func runDelete(cmd *cobra.Command, args []string) error {
+	if !utils.IsInteractive() {
+		return fmt.Errorf("nora delete requires an interactive terminal (use nora manage for scripted deletion)")
+	}
+
 	dir, err := loadNotesDir()
 	if err != nil {
 		return err
@@ -69,12 +71,11 @@ func confirmAndDelete(files []string, dir string, archive bool) error {
 		fmt.Printf("  %s\n", filepath.Base(f))
 	}
 
-	fmt.Printf("\n%s %d note(s)? [y/N] ", action, len(files))
-	reader := bufio.NewReader(os.Stdin)
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(strings.ToLower(input))
-
-	if input != "y" && input != "yes" {
+	ok, err := utils.Confirm(fmt.Sprintf("%s %d note(s)?", action, len(files)))
+	if err != nil {
+		return err
+	}
+	if !ok {
 		fmt.Println("Cancelled.")
 		return nil
 	}

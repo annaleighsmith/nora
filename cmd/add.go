@@ -1,21 +1,16 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
-	"unicode"
 
 	"github.com/annaleighsmith/nora/ai"
-	"github.com/annaleighsmith/nora/config"
 	"github.com/annaleighsmith/nora/utils"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
 
@@ -48,12 +43,17 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		input = strings.Join(args, " ")
 	} else {
-		fmt.Println("Type your note (Ctrl-D to finish):")
-		raw, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("could not read input: %w", err)
+		if !utils.IsInteractive() {
+			return fmt.Errorf("nora add requires note text as arguments when not running in a terminal")
 		}
-		input = strings.TrimSpace(string(raw))
+		err := huh.NewText().
+			Title("Type your note").
+			Value(&input).
+			Run()
+		if err != nil {
+			return nil
+		}
+		input = strings.TrimSpace(input)
 	}
 
 	return formatAndSave(dir, input)
@@ -107,18 +107,18 @@ func formatAndSave(dir, input string) error {
 		return err
 	}
 
-	formatted = stripCodeFences(formatted)
-	filename := generateFilename(formatted)
+	formatted = utils.StripCodeFences(formatted)
+	filename := utils.GenerateFilename(formatted)
 	fullPath := filepath.Join(dir, filename)
 
 	fmt.Println()
 	fmt.Println(utils.Render(formatted))
 
-	fmt.Printf("\nSave as %s? [y/N] ", filename)
-
-	reader := bufio.NewReader(os.Stdin)
-	confirm, _ := reader.ReadString('\n')
-	if strings.TrimSpace(strings.ToLower(confirm)) != "y" {
+	ok, err := utils.Confirm(fmt.Sprintf("Save as %s?", filename))
+	if err != nil {
+		return err
+	}
+	if !ok {
 		fmt.Println("Discarded.")
 		return nil
 	}
@@ -131,123 +131,3 @@ func formatAndSave(dir, input string) error {
 	return nil
 }
 
-func generateFilename(content string) string {
-	cfg, err := config.Load()
-	if err != nil {
-		// Fall back to defaults if config can't be loaded
-		cfg = config.DefaultConfig()
-	}
-
-	title := extractTitle(content)
-	date := extractDate(content)
-	if date == "" {
-		date = time.Now().Format(cfg.Format.DateFormat)
-	}
-	slug := slugify(title, cfg.Format.SlugStyle)
-
-	name := cfg.Format.Naming
-	name = strings.ReplaceAll(name, "{date}", date)
-	name = strings.ReplaceAll(name, "{slug}", slug)
-
-	return name + ".md"
-}
-
-// generateFilenameFromSlug uses a custom slug instead of extracting the title,
-// but still applies the configured naming convention (date, slug style).
-func generateFilenameFromSlug(content string, customName string) string {
-	cfg, err := config.Load()
-	if err != nil {
-		cfg = config.DefaultConfig()
-	}
-
-	// Strip .md if provided
-	slug := strings.TrimSuffix(customName, ".md")
-	slug = slugify(slug, cfg.Format.SlugStyle)
-
-	date := extractDate(content)
-	if date == "" {
-		date = time.Now().Format(cfg.Format.DateFormat)
-	}
-
-	name := cfg.Format.Naming
-	name = strings.ReplaceAll(name, "{date}", date)
-	name = strings.ReplaceAll(name, "{slug}", slug)
-
-	return name + ".md"
-}
-
-func extractDate(content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "date:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "date:"))
-		}
-	}
-	return ""
-}
-
-func extractTitle(content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "title:") {
-			title := strings.TrimSpace(strings.TrimPrefix(line, "title:"))
-			return strings.Trim(title, "\"'")
-		}
-	}
-	return "note"
-}
-
-func slugify(s string, style string) string {
-	switch style {
-	case "snake":
-		return slugifyWith(s, "_")
-	case "pascal":
-		return pascalize(s)
-	default: // "kebab"
-		return slugifyWith(s, "-")
-	}
-}
-
-var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slugifyWith(s string, sep string) string {
-	s = strings.ToLower(s)
-	s = slugRe.ReplaceAllString(s, sep)
-	s = strings.Trim(s, sep)
-	if len(s) > 50 {
-		s = s[:50]
-		s = strings.TrimRight(s, sep)
-	}
-	return s
-}
-
-func pascalize(s string) string {
-	reg := regexp.MustCompile(`[^a-zA-Z0-9]+`)
-	words := reg.Split(s, -1)
-	var result strings.Builder
-	for _, w := range words {
-		if w == "" {
-			continue
-		}
-		runes := []rune(w)
-		runes[0] = unicode.ToUpper(runes[0])
-		result.WriteString(string(runes))
-	}
-	out := result.String()
-	if len(out) > 50 {
-		out = out[:50]
-	}
-	return out
-}
-
-func stripCodeFences(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		if i := strings.Index(s, "\n"); i != -1 {
-			s = s[i+1:]
-		}
-	}
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimRight(s, "\n")
-	}
-	return s
-}

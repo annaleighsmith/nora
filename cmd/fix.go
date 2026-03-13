@@ -58,10 +58,11 @@ func runFixFrontmatter(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  ~ %s\n", name)
 	}
 
-	fmt.Printf("\nFix these notes? [y/N] ")
-	var confirm string
-	fmt.Scanln(&confirm)
-	if strings.ToLower(confirm) != "y" {
+	ok, err := utils.Confirm("Fix these notes?")
+	if err != nil {
+		return err
+	}
+	if !ok {
 		fmt.Println("Cancelled.")
 		return nil
 	}
@@ -110,7 +111,7 @@ func runFixNaming(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		expected := generateFilename(string(data))
+		expected := utils.GenerateFilename(string(data))
 		if expected == e.Name() {
 			continue
 		}
@@ -134,10 +135,11 @@ func runFixNaming(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s → %s\n", r.oldName, r.newName)
 	}
 
-	fmt.Printf("\nRename these notes? [y/N] ")
-	var confirm string
-	fmt.Scanln(&confirm)
-	if strings.ToLower(confirm) != "y" {
+	ok, err := utils.Confirm("Rename these notes?")
+	if err != nil {
+		return err
+	}
+	if !ok {
 		fmt.Println("Cancelled.")
 		return nil
 	}

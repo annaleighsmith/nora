@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/annaleighsmith/nora/config"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -117,10 +118,10 @@ var modelSetProviderCmd = &cobra.Command{
 		fmt.Printf("Set provider -> %s\n", name)
 
 		if name == "claude-code" {
-			fmt.Println("\n  Warning: Claude Code Backend")
-			fmt.Println("  This option only exists because this is a non-commercial,")
-			fmt.Println("  low-volume, open source CLI application. Use at your own")
-			fmt.Println("  risk and check Anthropic's latest policy.")
+			fmt.Print("\n" + utils.FrameWarning("Warning: Claude Code Backend",
+				"This option only exists because this is a non-commercial,\n"+
+					"low-volume, open source CLI application. Use at your own\n"+
+					"risk and check Anthropic's latest policy."))
 		}
 
 		return nil

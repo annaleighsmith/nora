@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,6 +47,11 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	// File-scoped mode: preload a note into context
 	fileFlag, _ := cmd.Flags().GetString("file")
 	if cmd.Flags().Changed("file") {
+		// -f with no value needs fzf (interactive)
+		if strings.TrimSpace(fileFlag) == "" && !utils.IsInteractive() {
+			return fmt.Errorf("nora ask -f requires a TTY for file selection (provide a filename: -f <file>)")
+		}
+
 		filePath, question, err := resolveFileAndQuestion(dir, fileFlag, args)
 		if err != nil {
 			return err
@@ -65,11 +69,13 @@ func runAsk(cmd *cobra.Command, args []string) error {
 		session.PreloadFile(filename, string(content))
 		utils.Dimf("Loaded %s\n\n", filename)
 
-		// If no question from args, prompt for one
+		// If no question from args, need interactive prompt
 		if question == "" {
-			reader := bufio.NewReader(os.Stdin)
+			if !utils.IsInteractive() {
+				return fmt.Errorf("nora ask -f <file> requires a question argument or interactive terminal")
+			}
 			utils.Dimf("Ask about %s:\n", filename)
-			input, done := utils.PromptBare(reader)
+			input, done := utils.PromptBare()
 			if done || input == "" {
 				return nil
 			}
@@ -83,8 +89,10 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	// Normal mode: question from args or prompt
 	question := strings.Join(args, " ")
 	if question == "" {
-		reader := bufio.NewReader(os.Stdin)
-		input, done := utils.PromptBare(reader)
+		if !utils.IsInteractive() {
+			return fmt.Errorf("nora ask requires a question argument when not running in a terminal")
+		}
+		input, done := utils.PromptBare()
 		if done || input == "" {
 			return nil
 		}
@@ -119,7 +127,6 @@ func resolveFileAndQuestion(dir, fileFlag string, args []string) (string, string
 }
 
 func chatLoop(session *ai.Session, question string) error {
-	reader := bufio.NewReader(os.Stdin)
 	followUp := false
 
 	for {
@@ -141,7 +148,7 @@ func chatLoop(session *ai.Session, question string) error {
 
 		fmt.Println()
 
-		input, done := utils.PromptFollowUp(reader, len(files))
+		input, done := utils.PromptFollowUp(len(files))
 		if done {
 			return nil
 		}
@@ -149,7 +156,7 @@ func chatLoop(session *ai.Session, question string) error {
 		if len(files) > 0 && (input == "e" || input == "l") {
 			browseFiles(files, input)
 
-			input, done = utils.PromptFollowUp(reader, 0)
+			input, done = utils.PromptFollowUp(0)
 			if done {
 				return nil
 			}
@@ -189,7 +196,7 @@ func browseFiles(files []string, mode string) {
 				fmt.Fprintf(os.Stderr, "could not read %s: %v\n", selected, err)
 				continue
 			}
-			utils.Dim.Println(filepath.Base(selected))
+			fmt.Println(utils.Dim.Render(filepath.Base(selected)))
 			fmt.Println(utils.Render(string(content)))
 		}
 	}

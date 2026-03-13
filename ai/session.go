@@ -106,9 +106,8 @@ type Session struct {
 
 // NewSession creates a new conversational ask session (read-only tools).
 func NewSession(notesDir string) (*Session, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+	if _, err := RequireAPIKey(); err != nil {
+		return nil, err
 	}
 
 	cfg, err := config.Load()
@@ -139,9 +138,8 @@ func NewSession(notesDir string) (*Session, error) {
 
 // NewManageSession creates a manage session with read + write tools.
 func NewManageSession(notesDir string, confirmFn ConfirmFunc) (*Session, error) {
-	key := os.Getenv("ANTHROPIC_API_KEY")
-	if key == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable not set")
+	if _, err := RequireAPIKey(); err != nil {
+		return nil, err
 	}
 
 	cfg, err := config.Load()

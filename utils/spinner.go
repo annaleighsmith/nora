@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -36,7 +37,7 @@ func StartSpinner(msg string) func() {
 			default:
 				activeSpinner.mu.Lock()
 				ClearLine(os.Stderr)
-				Dim.Fprintf(os.Stderr, "%s %s", frames[i%len(frames)], msg)
+				fmt.Fprint(os.Stderr, Dim.Render(fmt.Sprintf("%s %s", frames[i%len(frames)], msg)))
 				activeSpinner.mu.Unlock()
 				i++
 				time.Sleep(80 * time.Millisecond)

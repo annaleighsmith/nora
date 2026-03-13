@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/annaleighsmith/nora/ai"
 	"github.com/annaleighsmith/nora/config"
+	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -182,7 +182,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		frontmatter = stripCodeFences(frontmatter)
+		frontmatter = utils.StripCodeFences(frontmatter)
 		frontmatter = strings.TrimSpace(frontmatter)
 
 		// Use the file's last modified date instead of today
@@ -199,9 +199,9 @@ func runImport(cmd *cobra.Command, args []string) error {
 		combined := frontmatter + "\n\n" + input
 		var newFilename string
 		if customName != "" {
-			newFilename = deduplicateFilename(dir, generateFilenameFromSlug(frontmatter, customName))
+			newFilename = deduplicateFilename(dir, utils.GenerateFilenameFromSlug(frontmatter, customName))
 		} else {
-			newFilename = deduplicateFilename(dir, generateFilename(frontmatter))
+			newFilename = deduplicateFilename(dir, utils.GenerateFilename(frontmatter))
 		}
 
 		entries = append(entries, importEntry{
@@ -224,10 +224,11 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Confirm
-	fmt.Printf("\nImport %d note(s)? [y/N] ", len(entries))
-	reader := bufio.NewReader(os.Stdin)
-	confirm, _ := reader.ReadString('\n')
-	if strings.TrimSpace(strings.ToLower(confirm)) != "y" {
+	ok, err := utils.Confirm(fmt.Sprintf("Import %d note(s)?", len(entries)))
+	if err != nil {
+		return err
+	}
+	if !ok {
 		fmt.Println("Import cancelled.")
 		return nil
 	}

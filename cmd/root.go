@@ -67,14 +67,14 @@ func b(s string) string {
 	if !isTTY {
 		return s
 	}
-	return utils.Bold.Sprint(s)
+	return utils.Bold.Render(s)
 }
 
 func u(s string) string {
 	if !isTTY {
 		return s
 	}
-	return utils.Underline.Sprint(s)
+	return utils.Underline.Render(s)
 }
 
 func init() {
@@ -140,7 +140,7 @@ A terminal-first AI-powered note-taking tool
 func cleanup() {
 	fmt.Fprintln(os.Stderr)
 	utils.ClearLine(os.Stderr)
-	utils.Dim.Fprintln(os.Stderr, "Goodbye!")
+	fmt.Fprintln(os.Stderr, utils.Dim.Render("Goodbye!"))
 	ai.Usage.Print()
 	ai.DebugLog.Close()
 }

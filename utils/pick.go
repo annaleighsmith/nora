@@ -9,12 +9,15 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/ansi"
-	"golang.org/x/term"
 )
 
 // Pick opens fzf to select a note with fuzzy matching across filenames and content.
 // Returns the selected file path, or empty string if cancelled.
 func Pick(dir, query string, inline bool) (string, error) {
+	if !IsInteractive() {
+		return "", ErrNotInteractive
+	}
+
 	self, err := os.Executable()
 	if err != nil {
 		return "", fmt.Errorf("could not determine executable path: %w", err)
@@ -39,21 +42,16 @@ func Pick(dir, query string, inline bool) (string, error) {
 		preview := FirstLines(dir, name, 2)
 		preview = strings.ReplaceAll(preview, "\n", " ")
 
-		display := name
-		if title != "" && title != name {
-			display = name + " — " + title
-		}
-		if preview != "" {
-			display += " | " + preview
-		}
-		// Format: full_path\tdisplay_text — fzf shows field 2+, returns field 1
-		lines = append(lines, f+"\t"+display)
+		// Format: path\tfilename\tsearchable — fzf shows field 2, searches all
+		searchable := title + " " + preview
+		lines = append(lines, f+"\t"+name+"\t"+searchable)
 	}
 
 	fzfArgs := []string{
+		"-i",
 		"--delimiter", "\t",
 		"--with-nth", "2",
-		"--preview", fmt.Sprintf("%s _preview {1}", self),
+		"--preview", fmt.Sprintf("echo {} | cut -f1 | xargs -I@@ %s _preview @@ {q}", self),
 		"--preview-window", "right:60%:wrap",
 	}
 
@@ -107,6 +105,9 @@ func pickByTag(dir, query string, inline bool, self string) (string, error) {
 // PickFrom opens fzf seeded with a specific list of file paths.
 // Returns the selected file path, or empty string if cancelled.
 func PickFrom(paths []string, inline bool) (string, error) {
+	if !IsInteractive() {
+		return "", ErrNotInteractive
+	}
 	if len(paths) == 0 {
 		return "", nil
 	}
@@ -119,7 +120,7 @@ func PickFrom(paths []string, inline bool) (string, error) {
 	fzfArgs := []string{
 		"--delimiter", "/",
 		"--with-nth", "-1",
-		"--preview", fmt.Sprintf("%s _preview {}", self),
+		"--preview", fmt.Sprintf("%s _preview {} {q}", self),
 		"--preview-window", "right:60%:wrap",
 	}
 
@@ -142,6 +143,9 @@ func PickFrom(paths []string, inline bool) (string, error) {
 // PickMultiFrom opens fzf in multi-select mode seeded with a specific list of file paths.
 // Returns selected file paths, or nil if cancelled.
 func PickMultiFrom(paths []string, inline bool) ([]string, error) {
+	if !IsInteractive() {
+		return nil, ErrNotInteractive
+	}
 	if len(paths) == 0 {
 		return nil, nil
 	}
@@ -155,7 +159,7 @@ func PickMultiFrom(paths []string, inline bool) ([]string, error) {
 		"--multi",
 		"--delimiter", "/",
 		"--with-nth", "-1",
-		"--preview", fmt.Sprintf("%s _preview {}", self),
+		"--preview", fmt.Sprintf("%s _preview {} {q}", self),
 		"--preview-window", "right:60%:wrap",
 	}
 
@@ -183,6 +187,8 @@ func PickMultiFrom(paths []string, inline bool) ([]string, error) {
 }
 
 // Show picks a note with inline fzf and prints its content.
+// When stdout is a TTY, wraps output in a bordered frame with metadata chrome.
+// When piped, falls back to plain dim filename + rendered markdown.
 func Show(dir, query string) error {
 	path, err := Pick(dir, query, true)
 	if err != nil || path == "" {
@@ -194,8 +200,20 @@ func Show(dir, query string) error {
 		return fmt.Errorf("could not read %s: %w", path, err)
 	}
 
-	Dim.Println(filepath.Base(path))
-	fmt.Println(Render(string(content)))
+	raw := string(content)
+	filename := filepath.Base(path)
+
+	if !IsTTY() {
+		fmt.Println(Dim.Render(filename))
+		fmt.Println(Render(raw))
+		return nil
+	}
+
+	meta := ParseNoteMeta(raw, filename)
+	body := StripFrontmatter(raw)
+	// Render at inner width: total - 6 (2 borders + 4 padding spaces)
+	rendered := RenderWidth(body, TermWidth()-6)
+	fmt.Print(FrameContent(rendered, meta))
 	return nil
 }
 
@@ -218,13 +236,13 @@ func Open(dir, query string) error {
 	return cmd.Run()
 }
 
-// Render formats markdown content for terminal display using glamour.
+// Render formats markdown content for terminal display using glamour at full terminal width.
 func Render(content string) string {
-	width := 80
-	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-		width = w
-	}
+	return RenderWidth(content, TermWidth())
+}
 
+// RenderWidth formats markdown content for terminal display at a specific width.
+func RenderWidth(content string, width int) string {
 	r, err := glamour.NewTermRenderer(
 		glamour.WithStyles(termStyle()),
 		glamour.WithWordWrap(width),

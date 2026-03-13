@@ -43,28 +43,7 @@ func hasTag(path, tag string) bool {
 	if err != nil {
 		return false
 	}
-	content := string(data)
-	fm := extractFrontmatterBlock(content)
-	if fm == "" {
-		return false
-	}
-	tag = strings.ToLower(tag)
-
-	for _, line := range strings.Split(strings.ToLower(fm), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "tags:") {
-			continue
-		}
-		after := strings.TrimPrefix(trimmed, "tags:")
-		after = strings.Trim(strings.TrimSpace(after), "[]")
-		for _, t := range strings.Split(after, ",") {
-			if strings.TrimSpace(t) == tag {
-				return true
-			}
-		}
-		return false
-	}
-	return false
+	return HasTag(string(data), tag)
 }
 
 // extractFrontmatterBlock returns the frontmatter content, handling both
@@ -316,15 +295,8 @@ func FirstLines(dir, name string, n int) string {
 		return ""
 	}
 
-	content := string(data)
-	// Skip frontmatter
-	if strings.HasPrefix(content, "---") {
-		if end := strings.Index(content[3:], "---"); end != -1 {
-			content = content[3+end+3:]
-		}
-	}
-
-	lines := strings.Split(strings.TrimSpace(content), "\n")
+	_, body := splitFrontmatter(string(data))
+	lines := strings.Split(strings.TrimSpace(body), "\n")
 	if len(lines) > n {
 		lines = lines[:n]
 	}

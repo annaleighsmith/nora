@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
-	"time"
 
-	"github.com/annaleighsmith/nora/config"
 	"github.com/annaleighsmith/nora/utils"
 
 	"github.com/anthropics/anthropic-sdk-go"
@@ -22,6 +19,7 @@ type ToolResult struct {
 	IsError      bool
 	NeedsConfirm bool
 	Proposal     string
+	ProposalFile string // filename hint — when set, proposal is framed as a note
 	Execute      func() (string, error)
 }
 
@@ -480,18 +478,16 @@ func handleCreateNote(notesDir string, rawInput json.RawMessage, budget *ReadBud
 	if err != nil {
 		return ToolResult{Content: fmt.Sprintf("formatting error: %v", err), IsError: true}
 	}
-	formatted = stripCreateFences(formatted)
+	formatted = utils.StripCodeFences(formatted)
 
 	// Generate filename from the formatted content
-	filename := safeName(generateCreateFilename(formatted))
+	filename := safeName(utils.GenerateFilename(formatted))
 	fullPath := filepath.Join(notesDir, filename)
-
-	var proposal strings.Builder
-	fmt.Fprintf(&proposal, "Create note %s?\n\n%s", filename, formatted)
 
 	return ToolResult{
 		NeedsConfirm: true,
-		Proposal:     proposal.String(),
+		Proposal:     formatted,
+		ProposalFile: filename,
 		Execute: func() (string, error) {
 			if err := os.WriteFile(fullPath, []byte(formatted+"\n"), 0644); err != nil {
 				return "", fmt.Errorf("could not save note: %w", err)
@@ -621,73 +617,3 @@ func safeNames(names []string) []string {
 	return out
 }
 
-// --- Helpers for create_note ---
-
-func stripCreateFences(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		if i := strings.Index(s, "\n"); i != -1 {
-			s = s[i+1:]
-		}
-	}
-	if strings.HasSuffix(s, "```") {
-		s = strings.TrimSuffix(s, "```")
-		s = strings.TrimRight(s, "\n")
-	}
-	return s
-}
-
-func generateCreateFilename(content string) string {
-	cfg, err := config.Load()
-	if err != nil {
-		cfg = config.DefaultConfig()
-	}
-
-	title := extractCreateTitle(content)
-	date := extractCreateDate(content)
-	if date == "" {
-		date = time.Now().Format(cfg.Format.DateFormat)
-	}
-	slug := slugifyCreate(title, cfg.Format.SlugStyle)
-
-	name := cfg.Format.Naming
-	name = strings.ReplaceAll(name, "{date}", date)
-	name = strings.ReplaceAll(name, "{slug}", slug)
-	return name + ".md"
-}
-
-func extractCreateTitle(content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "title:") {
-			title := strings.TrimSpace(strings.TrimPrefix(line, "title:"))
-			return strings.Trim(title, "\"'")
-		}
-	}
-	return "note"
-}
-
-func extractCreateDate(content string) string {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(line, "date:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "date:"))
-		}
-	}
-	return ""
-}
-
-var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slugifyCreate(s string, style string) string {
-	s = strings.ToLower(s)
-	sep := "-"
-	if style == "snake" {
-		sep = "_"
-	}
-	s = slugRe.ReplaceAllString(s, sep)
-	s = strings.Trim(s, sep)
-	if len(s) > 50 {
-		s = s[:50]
-		s = strings.TrimRight(s, sep)
-	}
-	return s
-}

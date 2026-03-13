@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +8,7 @@ import (
 	"github.com/annaleighsmith/nora/ai"
 	"github.com/annaleighsmith/nora/utils"
 
+	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
 )
 
@@ -41,15 +41,33 @@ func runManage(cmd *cobra.Command, args []string) error {
 	var restartSpinnerFn func()
 
 	confirmFn := func(result ai.ToolResult) ai.ConfirmResponse {
+		// Non-interactive: auto-approve (the agent intended the action)
+		if !utils.IsInteractive() {
+			return ai.ConfirmResponse{Approved: true}
+		}
+
 		if stopSpinnerFn != nil {
 			stopSpinnerFn()
 		}
 
-		fmt.Printf("\n%s\n", utils.Render(result.Proposal))
-		utils.Dim.Println("Enter to confirm, or type feedback to revise:")
-		fmt.Fprint(os.Stderr, utils.PromptCaret)
-		reader := bufio.NewReader(os.Stdin)
-		input, _ := reader.ReadString('\n')
+		if result.ProposalFile != "" && utils.IsTTY() {
+			meta := utils.ParseNoteMeta(result.Proposal, result.ProposalFile)
+			body := utils.StripFrontmatter(result.Proposal)
+			rendered := utils.RenderWidth(body, utils.TermWidth()-6)
+			fmt.Printf("\n%s", utils.FrameContent(rendered, meta))
+		} else {
+			fmt.Printf("\n%s\n", utils.Render(result.Proposal))
+		}
+
+		var input string
+		err := huh.NewInput().
+			Title("Enter to confirm, or type feedback to revise").
+			Prompt("> ").
+			Value(&input).
+			Run()
+		if err != nil {
+			return ai.ConfirmResponse{Approved: true}
+		}
 		input = strings.TrimSpace(input)
 
 		if input == "" {
@@ -67,8 +85,6 @@ func runManage(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer session.SaveMemories()
-
-	reader := bufio.NewReader(os.Stdin)
 
 	send := func(question string) error {
 		stop := utils.StartSpinner("Thinking...")
@@ -93,7 +109,10 @@ func runManage(cmd *cobra.Command, args []string) error {
 		return send(question)
 	}
 
-	// REPL mode
+	// REPL mode requires interactive terminal
+	if !utils.IsInteractive() {
+		return fmt.Errorf("nora manage requires a message argument when not running in a terminal")
+	}
 	utils.Dimf("Manage mode — read + write access to your vault. exit to quit.\n\n")
 
 	followUp := false
@@ -102,7 +121,7 @@ func runManage(cmd *cobra.Command, args []string) error {
 			fmt.Printf("\n%s\n", utils.PromptHint)
 		}
 
-		input, done := utils.PromptBare(reader)
+		input, done := utils.PromptBare()
 		if done {
 			return nil
 		}

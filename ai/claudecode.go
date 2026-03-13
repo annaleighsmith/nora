@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strings"
 )
 
 // ClaudeCodeProvider shells out to the `claude` CLI for completions.
@@ -32,13 +31,7 @@ func (p *ClaudeCodeProvider) Complete(ctx context.Context, req CompletionRequest
 	}
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
-
-	// Strip ANTHROPIC_API_KEY so claude uses subscription auth, not the API key.
-	for _, env := range os.Environ() {
-		if !strings.HasPrefix(env, "ANTHROPIC_API_KEY=") {
-			cmd.Env = append(cmd.Env, env)
-		}
-	}
+	cmd.Env = StripAnthropicKey(os.Environ())
 
 	out, err := cmd.Output()
 	if err != nil {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/fatih/color"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // TODO: Gate this behind a -v/--verbose flag instead of always printing.
@@ -94,8 +94,8 @@ func (u *tokenUsage) Add(model string, input, output, cacheCreation, cacheRead i
 	u.mu.Unlock()
 
 	if warning != "" {
-		dim := color.New(color.Faint)
-		dim.Print(warning)
+		dim := lipgloss.NewStyle().Faint(true)
+		fmt.Print(dim.Render(warning))
 	}
 }
 
@@ -121,7 +121,7 @@ func (u *tokenUsage) Print() {
 	}
 
 	totalTokens := totalInput + totalOutput + totalCacheCreation + totalCacheRead
-	dim := color.New(color.Faint)
-	dim.Printf("[%d API call(s): %d tokens ~$%.4f]\n",
-		totalCalls, totalTokens, totalCost)
+	dim := lipgloss.NewStyle().Faint(true)
+	fmt.Println(dim.Render(fmt.Sprintf("[%d API call(s): %d tokens ~$%.4f]",
+		totalCalls, totalTokens, totalCost)))
 }

@@ -7,6 +7,6 @@
 
 .claude/
 
-# Dolt database files (added by bd init)
+# Dolt database files (added by br init)
 .dolt/
 *.db

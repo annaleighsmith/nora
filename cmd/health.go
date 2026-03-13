@@ -145,7 +145,7 @@ func runHealth(cmd *cobra.Command, args []string) error {
 
 			// Check auth — make sure subscription auth is active (not just API key)
 			authCmd := exec.Command("claude", "auth", "status")
-			authCmd.Env = stripAnthropicKey(os.Environ())
+			authCmd.Env = ai.StripAnthropicKey(os.Environ())
 			if authOut, err := authCmd.Output(); err != nil {
 				printStatus("claude auth", false, "not logged in — run `claude auth login`")
 				ok = false
@@ -192,23 +192,11 @@ func runHealth(cmd *cobra.Command, args []string) error {
 }
 
 func printStatus(label string, ok bool, detail string) {
-	icon := utils.Green.Sprint("✓")
+	icon := utils.Green.Render("✓")
 	if !ok {
-		icon = utils.Red.Sprint("✗")
+		icon = utils.Red.Render("✗")
 	}
 	fmt.Fprintf(tw, "  %s\t%s\t%s\n", icon, label, detail)
-}
-
-// stripAnthropicKey returns env without ANTHROPIC_API_KEY so claude CLI
-// uses subscription auth instead of the API key.
-func stripAnthropicKey(env []string) []string {
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		if !strings.HasPrefix(e, "ANTHROPIC_API_KEY=") {
-			filtered = append(filtered, e)
-		}
-	}
-	return filtered
 }
 
 func expandHome(path string) string {

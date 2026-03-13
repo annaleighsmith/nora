@@ -20,7 +20,7 @@ func SearchNotes(dir, query string, color bool) (string, error) {
 		return "no query provided", nil
 	}
 
-	args := []string{"--no-messages"}
+	args := []string{"--no-messages", "--line-number"}
 	if color {
 		args = append(args, "--color=always")
 	}
@@ -67,7 +67,7 @@ func truncateResults(result string) string {
 		if len(lines) > maxSearchLines {
 			truncated := lines[:maxSearchLines]
 			// Count total lines in the actual file (first line is the filename in --heading mode)
-			totalLines := countFileLines(stripANSI(strings.TrimSpace(lines[0])))
+			totalLines := countFileLines(StripANSI(strings.TrimSpace(lines[0])))
 			truncated = append(truncated, fmt.Sprintf("... (truncated, file is %d lines total — use read_note to get more)", totalLines))
 			out = append(out, strings.Join(truncated, "\n"))
 		} else {
@@ -80,7 +80,7 @@ func truncateResults(result string) string {
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
-func stripANSI(s string) string {
+func StripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
 }
 
@@ -218,47 +218,8 @@ func NoteIndex(notesDir string) (string, error) {
 
 // extractFrontmatterMeta pulls title and tags from YAML frontmatter.
 func extractFrontmatterMeta(content string) (title, tags string) {
-	if !strings.HasPrefix(content, "---") {
-		return "", ""
-	}
-	end := strings.Index(content[3:], "---")
-	if end == -1 {
-		return "", ""
-	}
-	fm := content[3 : 3+end]
-
-	var tagList []string
-	inTags := false
-	for _, line := range strings.Split(fm, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "title:") {
-			title = strings.TrimSpace(strings.TrimPrefix(trimmed, "title:"))
-			title = strings.Trim(title, "\"'")
-		} else if strings.HasPrefix(trimmed, "tags:") {
-			inTags = true
-			// inline tags: tags: [a, b] or tags: a, b
-			after := strings.TrimSpace(strings.TrimPrefix(trimmed, "tags:"))
-			if after != "" {
-				after = strings.Trim(after, "[]")
-				for _, t := range strings.Split(after, ",") {
-					t = strings.TrimSpace(t)
-					if t != "" {
-						tagList = append(tagList, t)
-					}
-				}
-				inTags = false
-			}
-		} else if inTags && strings.HasPrefix(trimmed, "-") {
-			tag := strings.TrimSpace(strings.TrimPrefix(trimmed, "-"))
-			if tag != "" {
-				tagList = append(tagList, tag)
-			}
-		} else if inTags && trimmed != "" {
-			inTags = false
-		}
-	}
-
-	return title, strings.Join(tagList, ", ")
+	fm, _ := ParseFrontmatter(content)
+	return fm.Title, strings.Join(fm.Tags, ", ")
 }
 
 // ReadNote reads a note by filename from the notes dir.

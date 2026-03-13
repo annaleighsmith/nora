@@ -81,10 +81,11 @@ func runTagsAdd(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  + %s\n", name)
 	}
 
-	fmt.Printf("\nAdd tag %q to these notes? [y/N] ", tag)
-	var confirm string
-	fmt.Scanln(&confirm)
-	if strings.ToLower(confirm) != "y" {
+	ok, err := utils.Confirm(fmt.Sprintf("Add tag %q to these notes?", tag))
+	if err != nil {
+		return err
+	}
+	if !ok {
 		fmt.Println("Cancelled.")
 		return nil
 	}
