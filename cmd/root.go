@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 
 	"github.com/annaleighsmith/nora/ai"
@@ -51,14 +53,15 @@ var rootCmd = &cobra.Command{
 // shortcutFlags maps root-level shortcut flags to their handler functions.
 var shortcutFlags = []struct {
 	name    string
+	flag    string
 	handler func(*cobra.Command, []string) error
 }{
-	{"search", runSearch},
-	{"show", runShow},
-	{"list", runList},
-	{"edit", runEdit},
-	{"add", runAdd},
-	{"new", runNew},
+	{"search", "s", runSearch},
+	{"show", "p", runShow},
+	{"list", "l", runList},
+	{"edit", "e", runEdit},
+	{"add", "a", runAdd},
+	{"new", "n", runNew},
 }
 
 var isTTY = term.IsTerminal(int(os.Stdout.Fd()))
@@ -77,7 +80,47 @@ func u(s string) string {
 	return utils.Underline.Render(s)
 }
 
+// commandHelp returns the formatted Commands section from registered subcommands.
+func commandHelp() string {
+	var cmds []*cobra.Command
+	maxLen := 0
+	for _, c := range rootCmd.Commands() {
+		if c.Hidden {
+			continue
+		}
+		cmds = append(cmds, c)
+		if len(c.Name()) > maxLen {
+			maxLen = len(c.Name())
+		}
+	}
+	sort.Slice(cmds, func(i, j int) bool { return cmds[i].Name() < cmds[j].Name() })
+
+	var sb strings.Builder
+	for _, c := range cmds {
+		pad := strings.Repeat(" ", maxLen-len(c.Name()))
+		fmt.Fprintf(&sb, "  %s%s  %s\n", b(c.Name()), pad, c.Short)
+	}
+	return sb.String()
+}
+
+// shortcutHelp returns the formatted Shortcut Flags section.
+func shortcutHelp() string {
+	sorted := make([]struct{ name, flag string }, len(shortcutFlags))
+	for i, sf := range shortcutFlags {
+		sorted[i] = struct{ name, flag string }{sf.name, sf.flag}
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].flag < sorted[j].flag })
+
+	var sb strings.Builder
+	for _, sf := range sorted {
+		fmt.Fprintf(&sb, "  %s         Same as nora %s\n", b("-"+sf.flag), sf.name)
+	}
+	return sb.String()
+}
+
 func init() {
+	rootCmd.SetHelpCommand(&cobra.Command{Hidden: true})
+
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		if cmd != rootCmd {
 			fmt.Fprint(os.Stdout, cmd.UsageString())
@@ -95,30 +138,9 @@ A terminal-first AI-powered note-taking tool
   nora [FLAGS] [input]
 
 %s
-  %s        Quick note — type in terminal, AI formats
-  %s        Ask a question about your notes (-f for file scope)
-  %s     Delete or archive notes (fzf)
-  %s       Find a note and edit it in your editor
-  %s        Fix common issues in notes
-  %s     Check config, deps, and API connectivity
-  %s     Import markdown notes with AI formatting
-  %s       List notes in the vault (alias: ls)
-  %s     Manage your vault with AI (read + write)
-  %s      Manage AI models (list, get, set)
-  %s        New note — write in your editor, AI formats
-  %s     Search note contents with ripgrep
-  %s      Set up nora with your notes directory
-  %s       Find a note and print it
-  %s       List or manage tags
-
 %s
-  %s         Quick add (same as nora add)
-  %s         Edit (same as nora edit)
-  %s         List (same as nora list)
-  %s         New (same as nora new)
-  %s         Print (same as nora show)
-  %s         Search (same as nora search)
-
+%s
+%s
 %s
   -h, --help     Print help
   -V, --version  Print version
@@ -126,12 +148,9 @@ A terminal-first AI-powered note-taking tool
 			u(b("nora v0.1.0")),
 			b("Usage:"),
 			b("Commands:"),
-			b("add"), b("ask"), b("delete"), b("edit"), b("fix"),
-			b("health"), b("import"), b("list"), b("manage"),
-			b("model"), b("new"), b("search"),
-			b("setup"), b("show"), b("tags"),
+			commandHelp(),
 			b("Shortcut Flags:"),
-			b("-a"), b("-e"), b("-l"), b("-n"), b("-p"), b("-s"),
+			shortcutHelp(),
 			b("Options:"),
 		)
 	})
