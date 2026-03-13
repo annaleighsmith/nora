@@ -1,147 +1,84 @@
-# Agent Instructions
+# CLAUDE.md
 
-This project uses **br** (beads_rust) for issue tracking. Run `br onboard` to get started.
+This file provides guidance to agents working in this repository.
 
-## Quick Reference
+## Project Overview
 
-```bash
-br ready              # Find available work
-br show <id>          # View issue details
-br update <id> --claim  # Claim work atomically
-br close <id>         # Complete work
-br sync --flush-only  # Export issues to .beads/
-git add .beads/ && git commit -m "beads sync"  # Commit synced state
-```
+Nora is a self-hosted, terminal-first note-taking tool with a personality. It's a single Go binary that turns messy thoughts into clean markdown, then gives you an AI assistant (named by you, configurable personality) who actually *knows* your notes — searching, reading, remembering across sessions, and getting sharper the more you use it. Plain markdown files, flat directory, no lock-in, no cloud — just your notes, your terminal, and an AI that feels like yours.
 
-## Non-Interactive Shell Commands
+This will be an open source GitHub project.
 
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
-
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
-
-**Use these forms instead:**
-```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
-
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
-```
-
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes` for non-interactive
-- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
-
-<!-- BEGIN BEADS INTEGRATION -->
-## Issue Tracking with br (beads_rust)
-
-**IMPORTANT**: This project uses **br (beads_rust)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
-
-**Note**: `br` never executes git commands. After running `br sync --flush-only`, you must manually `git add` and `git commit` the changes in `.beads/`.
-
-### Why br?
-
-- Dependency-aware: Track blockers and relationships between issues
-- Version-controlled: Built on Dolt with cell-level merge
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
-
-### Quick Start
-
-**Check for ready work:**
+## Build & Run
 
 ```bash
-br ready --json
+go build -o nora .           # build binary
+go run .                  # run directly
+go test ./...             # run all tests
+go test ./notes/...       # run tests for a package
+go test -run TestName ./pkg/  # run a single test
 ```
 
-**Create new issues:**
+## Architecture
+
+```
+main.go (entrypoint, CLI routing via cobra)
+  cmd/       CLI command implementations
+  ai/        Claude API client, formatting + querying prompts
+  notes/     Markdown file I/O, ripgrep integration, fzf integration
+  web/       HTTP server, routes, embedded static assets (go:embed)
+  config/    Notes dir, API key, editor, port
+```
+
+- **Single binary**: web assets embedded via `go:embed` in `web/static/`
+- **CLI framework**: `github.com/spf13/cobra`
+- **Web stack**: `net/http` + `html/template` + HTMX + Pico CSS + CodeMirror
+- **Markdown rendering**: `github.com/yuin/goldmark`
+- **AI flow (`n add`)**: raw input -> Claude API formats -> save as markdown with YAML frontmatter
+- **AI flow (`n ask`)**: multi-turn sessions with 5 tools (search, read, list_tags, list_recent, note_index) -> Claude streams answers citing filenames -> memories saved between sessions
+- **AI flow (`n import`)**: batch import with AI-generated frontmatter, inline tag extraction, mod-date preservation
+- **AI flow (`n tags add --ai`)**: ripgrep candidates filtered by AI for relevance
+- **Bot identity**: configurable name + personality in `[bot]` config, injected into system prompt
+- **Token tracking**: per-model usage with cache-aware cost calculation
+- **Backup**: git auto-commit goroutine in `n serve`, auto-generated commit messages
+
+## Workflow — Learning Project
+
+This is a learning project. The goal is understanding, not speed. Follow this loop:
+- **I propose next steps** — don't jump ahead or build things I haven't asked for
+- **We brainstorm together** — discuss tradeoffs, alternatives, and *why* before *how*
+- **Implement thoughtfully** — I should understand the full architecture and every decision before we write code
+- When in doubt, explain the concept or pattern before using it
+- Prefer small, incremental steps that I can reason about over large leaps
+
+## Conventions
+
+- Notes are flat files in `~/notes/` — no folder hierarchy, tags for organization
+- Note naming: `YYYY-MM-DD-slug.md` (date-stamped) or `slug.md` (persistent)
+- YAML frontmatter (title, date, tags) added by AI formatting
+- Support `[[wiki-links]]` in web UI
+- Bullet points over numbered lists in note content
+- Guard clauses and early returns over nested if/else
+
+## CLI Design
+
+- Follow unix conventions for flags and arg patterns (e.g. `-r` for recursive, `-f` for force, `-x` for exclude)
+- Avoid flag collisions with well-known unix meanings (`-i` = interactive, `-v` = verbose, `-n` = dry-run)
+- Model commands after familiar tools where applicable (`import` follows `cp` patterns, `tags` follows `git tag`)
+- Short flags for common operations, long flags for less common ones
+- Commands should work intuitively for anyone comfortable with a terminal
+
+## Issue Tracking
+
+This project uses **br** (beads_rust) for issue tracking. Run `br --help` for full usage.
 
 ```bash
-br create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-br create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:br-123 --json
+br ready                                                            # what to work on next (open, unblocked, not deferred)
+br show <id>                                                        # full issue details + dependencies
+br q "title" -p 2 -t bug                                           # quick-file an issue (prints ID only)
+br create "title" --description="..." -t bug|feature|task -p 0-4   # file an issue (verbose)
+br update <id> --claim                                              # assign to self + mark in_progress
+br close <id>                                                       # mark work done
+br dep add <issue> <blocked-by>                                     # wire a dependency
+br sync --flush-only                                                # export state to .beads/
+git add .beads/ && git commit -m "Sync beads"                       # persist changes
 ```
-
-**Claim and update:**
-
-```bash
-br update <id> --claim --json
-br update br-42 --priority 1 --json
-```
-
-**Complete work:**
-
-```bash
-br close br-42 --reason "Completed" --json
-```
-
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
-### Priorities
-
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
-
-### Workflow for AI Agents
-
-1. **Check ready work**: `br ready` shows unblocked issues
-2. **Claim your task atomically**: `br update <id> --claim`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `br create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `br close <id> --reason "Done"`
-
-### Important Rules
-
-- ✅ Use br for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `br ready` before asking "what should I work on?"
-- ❌ Do NOT create markdown TODO lists
-- ❌ Do NOT use external issue trackers
-- ❌ Do NOT duplicate tracking systems
-
-For more details, see README.md and docs/QUICKSTART.md.
-
-## Landing the Plane (Session Completion)
-
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
-
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   br sync --flush-only
-   git add .beads/
-   git commit -m "beads sync"
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
-<!-- END BEADS INTEGRATION -->

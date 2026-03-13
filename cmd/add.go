@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,10 +43,13 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	var input string
 	if len(args) > 0 {
 		input = strings.Join(args, " ")
-	} else {
-		if !utils.IsInteractive() {
-			return fmt.Errorf("nora add requires note text as arguments when not running in a terminal")
+	} else if !utils.IsInteractive() {
+		raw, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("could not read stdin: %w", err)
 		}
+		input = strings.TrimSpace(string(raw))
+	} else {
 		err := huh.NewText().
 			Title("Type your note").
 			Value(&input).
@@ -114,13 +118,15 @@ func formatAndSave(dir, input string) error {
 	fmt.Println()
 	fmt.Println(utils.Render(formatted))
 
-	ok, err := utils.Confirm(fmt.Sprintf("Save as %s?", filename))
-	if err != nil {
-		return err
-	}
-	if !ok {
-		fmt.Println("Discarded.")
-		return nil
+	if utils.IsInteractive() {
+		ok, err := utils.Confirm(fmt.Sprintf("Save as %s?", filename))
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Println("Discarded.")
+			return nil
+		}
 	}
 
 	if err := os.WriteFile(fullPath, []byte(formatted+"\n"), 0644); err != nil {
